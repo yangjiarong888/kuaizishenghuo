@@ -1,0 +1,30 @@
+# data/config.yaml
+# Appium服务器配置
+appium:
+  server_url: "http://localhost:4723"
+
+# 设备配置
+device:
+  platform_name: "Android"
+  device_name: "P7T4XC99CYAEYL4H"
+  automation_name: "UiAutomator2"
+  no_reset: true
+
+# App配置
+app:
+  package: "com.bs.feifubao"
+  activities:
+    main: "com.bs.feifubao.activity.MainActivity"
+    login: "com.bs.feifubao.activity.LoginActivity"
+    order: "com.bs.feifubao.activity.OrderActivity"
+
+# 测试数据
+test_data:
+  login:
+    valid_email: "test@example.com"
+    valid_password: "123456"
+    invalid_email: "wrong@example.com"
+    invalid_password: "wrong"
+  order:
+    default_food: "红烧肉"
+    search_keyword: "川菜"
