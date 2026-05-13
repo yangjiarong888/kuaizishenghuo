@@ -39,6 +39,108 @@ class MallCartBadgeReader:
         except Exception:
             return False
 
+    @staticmethod
+    def _digit_from_text(raw: str) -> Optional[int]:
+        m = re.search(r"\d+", (raw or "").strip())
+        return int(m.group(0)) if m else None
+
+    def _read_by_common_badge_ids(self) -> Optional[int]:
+        suffixes = (
+            "tv_cart_count",
+            "tv_badge",
+            "tv_cart_num",
+            "tv_message_count",
+            "badge_tv",
+            SHOP_ID_COUNT_TEXT,
+        )
+        for suf in suffixes:
+            el = self._ctx.first_displayed_by_pkg_id(suf)
+            if not el:
+                continue
+            try:
+                got = self._digit_from_text(el.text or "")
+                if got is not None:
+                    return got
+            except Exception as ex:
+                logger.debug("角标 id=%s 读文案失败: %s", suf, ex)
+        return None
+
+    def _score_badge_textview(
+        self, tv, bounds: Tuple[int, int, int, int]
+    ) -> Optional[Tuple[int, int]]:
+        try:
+            if not tv.is_displayed():
+                return None
+            tx = (tv.text or "").strip()
+            if not re.fullmatch(r"\d{1,4}", tx):
+                return None
+            if not self.tv_centre_in_bounds(tv, *bounds):
+                return None
+            if int(tv.size.get("width", 999)) > 96:
+                return None
+            return int(tv.location["x"]) + int(tv.location["y"]), int(tx)
+        except Exception:
+            return None
+
+    def _best_digit_near_anchor(self, root, bounds: Tuple[int, int, int, int]):
+        best: Optional[Tuple[int, int]] = None
+        containers = [root]
+        try:
+            containers.append(root.find_element(AppiumBy.XPATH, ".."))
+        except Exception:
+            pass
+        for container in containers:
+            try:
+                textviews = container.find_elements(
+                    AppiumBy.CLASS_NAME, "android.widget.TextView"
+                )
+            except Exception:
+                continue
+            for tv in textviews:
+                scored = self._score_badge_textview(tv, bounds)
+                if scored and (best is None or scored[0] > best[0]):
+                    best = scored
+        return best
+
+    def _read_near_cart_anchors(self) -> Optional[int]:
+        best: Optional[Tuple[int, int]] = None
+        for anchor in (
+            SHOP_ID_IV_SHOPPING_CART,
+            SHOP_ID_RL_SHOPPING_CART,
+            SHOP_ID_IV_CART,
+            SHOP_ID_RL_CART,
+            SHOP_ID_CV_CART,
+            SHOP_ID_FLOAT_VIEW,
+        ):
+            root = self._ctx.first_displayed_by_pkg_id(anchor)
+            if not root:
+                continue
+            try:
+                loc = root.location
+                sz = root.size
+                ax, ay = int(loc["x"]), int(loc["y"])
+                aw, ah = int(sz["width"]), int(sz["height"])
+            except Exception:
+                continue
+            bounds = (ax - 6, ay - 56, ax + aw + 80, ay + ah + 14)
+            scored = self._best_digit_near_anchor(root, bounds)
+            if scored and (best is None or scored[0] > best[0]):
+                best = scored
+        return best[1] if best else None
+
+    def _read_by_uiautomator_badge_id(self) -> Optional[int]:
+        try:
+            el = self._ctx.driver.find_element(
+                AppiumBy.ANDROID_UIAUTOMATOR,
+                "new UiSelector().resourceIdMatches("
+                '".+:(tv_cart_count|tv_badge|tv_cart_num|tv_message_count|badge_tv)$")',
+            )
+            if el and el.is_displayed():
+                return self._digit_from_text(el.text or "")
+        except Exception as ex:
+            logger.debug("角标 UiAutomator 兜底失败: %s", ex)
+        return None
+
     def read_digit(self) -> Optional[int]:
         """
         读取商城首页购物车角标数字；无法解析时返回 None。
@@ -47,112 +149,15 @@ class MallCartBadgeReader:
         否则仅在购物车/悬浮入口图标邻近小范围内找纯数字。
         """
         with self._ctx.zero_implicit_wait():
-            suffixes = (
-                "tv_cart_count",
-                "tv_badge",
-                "tv_cart_num",
-                "tv_message_count",
-                "badge_tv",
-                SHOP_ID_COUNT_TEXT,
-            )
-            for suf in suffixes:
-                el = self._ctx.first_displayed_by_pkg_id(suf)
-                if el:
-                    try:
-                        raw = (el.text or "").strip()
-                        m = re.search(r"\d+", raw)
-                        if m:
-                            return int(m.group(0))
-                    except Exception as ex:
-                        logger.debug("角标 id=%s 读文案失败: %s", suf, ex)
-
-            best: Optional[Tuple[int, int]] = None
-
-            for anchor in (
-                SHOP_ID_IV_SHOPPING_CART,
-                SHOP_ID_RL_SHOPPING_CART,
-                SHOP_ID_IV_CART,
-                SHOP_ID_RL_CART,
-                SHOP_ID_CV_CART,
-                SHOP_ID_FLOAT_VIEW,
+            for reader in (
+                self._read_by_common_badge_ids,
+                self._read_near_cart_anchors,
+                self._read_by_uiautomator_badge_id,
             ):
-                root = self._ctx.first_displayed_by_pkg_id(anchor)
-                if not root:
-                    continue
-                try:
-                    loc = root.location
-                    sz = root.size
-                    ax, ay = int(loc["x"]), int(loc["y"])
-                    aw, ah = int(sz["width"]), int(sz["height"])
-                except Exception:
-                    continue
-                pad_l, pad_t, pad_r, pad_b = 6, 56, 80, 14
-                L, T, R, B = ax - pad_l, ay - pad_t, ax + aw + pad_r, ay + ah + pad_b
-                for tv in root.find_elements(
-                    AppiumBy.CLASS_NAME, "android.widget.TextView"
-                ):
-                    try:
-                        if not tv.is_displayed():
-                            continue
-                        tx = (tv.text or "").strip()
-                        if not re.fullmatch(r"\d{1,4}", tx):
-                            continue
-                        if not self.tv_centre_in_bounds(tv, L, T, R, B):
-                            continue
-                        tw = int(tv.size.get("width", 999))
-                        if tw > 96:
-                            continue
-                        val = int(tx)
-                        if best is None:
-                            best = (ax + ay, val)
-                        else:
-                            s = int(tv.location["x"]) + int(tv.location["y"])
-                            if s > best[0]:
-                                best = (s, val)
-                    except Exception:
-                        continue
-                try:
-                    par = root.find_element(AppiumBy.XPATH, "..")
-                    for tv in par.find_elements(
-                        AppiumBy.CLASS_NAME, "android.widget.TextView"
-                    ):
-                        try:
-                            if not tv.is_displayed():
-                                continue
-                            tx = (tv.text or "").strip()
-                            if not re.fullmatch(r"\d{1,4}", tx):
-                                continue
-                            if not self.tv_centre_in_bounds(tv, L, T, R, B):
-                                continue
-                            tw = int(tv.size.get("width", 999))
-                            if tw > 96:
-                                continue
-                            val = int(tx)
-                            s = int(tv.location["x"]) + int(tv.location["y"])
-                            if best is None or s > best[0]:
-                                best = (s, val)
-                        except Exception:
-                            continue
-                except Exception:
-                    pass
-
-            if best:
-                return best[1]
-
-            try:
-                el = self._ctx.driver.find_element(
-                    AppiumBy.ANDROID_UIAUTOMATOR,
-                    "new UiSelector().resourceIdMatches("
-                    '".+:(tv_cart_count|tv_badge|tv_cart_num|tv_message_count|badge_tv)$")',
-                )
-                if el and el.is_displayed():
-                    raw = (el.text or "").strip()
-                    m = re.search(r"\d+", raw)
-                    if m:
-                        return int(m.group(0))
-            except Exception as ex:
-                logger.debug("角标 UiAutomator 兜底失败: %s", ex)
-            return None
+                got = reader()
+                if got is not None:
+                    return got
+        return None
 
     def read_expect_increase(
         self,

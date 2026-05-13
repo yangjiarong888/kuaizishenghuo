@@ -60,110 +60,111 @@ class MallProductDetailPage:
         except Exception:
             return False
 
+    def _visible_elements_in_band(self, elements, y_lo: int, y_hi: int):
+        scored: List[Tuple[int, object]] = []
+        for el in elements:
+            try:
+                if not el.is_displayed():
+                    continue
+                if self.mall_list_el_is_add_cart_control(el):
+                    continue
+                y = int(el.location.get("y", 0))
+                if y_lo <= y <= y_hi:
+                    scored.append((y, el))
+            except Exception:
+                continue
+        scored.sort(key=lambda t: t[0])
+        return scored
+
+    def _card_containers_in_rv(self, rv, y_lo: int, y_hi: int):
+        try:
+            items = rv.find_elements(
+                AppiumBy.XPATH,
+                f'.//*[contains(@resource-id,"{SHOP_ID_CL_ITEM_CONTAINER}")]',
+            )
+        except Exception:
+            return []
+        return self._visible_elements_in_band(items, y_lo, y_hi)
+
+    def _product_info_candidates_in_rv(self, rv, y_lo: int, y_hi: int):
+        candidates: List[Tuple[int, object]] = []
+        for xpath_inner in (
+            './/*[contains(@resource-id,":id/iv_goods") or '
+            'contains(@resource-id,"iv_goods")]',
+            './/*[contains(@resource-id,":id/image") or contains(@resource-id,"/image")]',
+            './/*[contains(@resource-id,":id/tv_goods_name") or '
+            'contains(@resource-id,"tv_goods_name")]',
+            './/*[contains(@resource-id,":id/tv_price") or '
+            'contains(@resource-id,"tv_price")]',
+        ):
+            try:
+                candidates = self._visible_elements_in_band(
+                    rv.find_elements(AppiumBy.XPATH, xpath_inner), y_lo, y_hi
+                )
+                if candidates:
+                    break
+            except Exception:
+                continue
+        return candidates
+
+    def _product_info_candidates_by_ids(self, y_lo: int, y_hi: int):
+        for suf in (
+            SHOP_ID_IV_GOODS,
+            SHOP_ID_TV_GOODS_NAME,
+            SHOP_ID_TV_PRICE,
+            SHOP_ID_IMAGE,
+        ):
+            scored = self._visible_elements_in_band(
+                self._o._all_displayed_by_pkg_id(suf), y_lo, y_hi
+            )
+            if scored:
+                return scored
+        return []
+
+    def _tap_candidate_into_detail(self, el) -> bool:
+        try:
+            self._o._nearest_clickable_ancestor(el).click()
+        except Exception:
+            try:
+                el.click()
+            except Exception:
+                return False
+        logger.info("已点击主列表商品图/信息区进详情")
+        time.sleep(1.85)
+        return bool(self._o._is_mall_product_detail_visible())
+
+    def _tap_left_coordinate_fallback(self) -> bool:
+        w, h = self._o._window_size()
+        try:
+            self._o.driver.execute_script(
+                "mobile: clickGesture",
+                {"x": int(w * 0.34), "y": int(h * 0.44)},
+            )
+            logger.info("主列表进详情：偏左坐标兜底（避让右侧加购区）")
+            time.sleep(1.85)
+            return bool(self._o._is_mall_product_detail_visible())
+        except Exception:
+            return False
+
     def tap_first_mall_list_product_into_detail(self) -> bool:
         h = self._o._window_size()[1]
         y_lo, y_hi = int(h * 0.14), int(h * 0.86)
         rv = self._o._first_displayed_by_pkg_id(SHOP_ID_RV_CONTENT)
         if rv:
-            try:
-                items = rv.find_elements(
-                    AppiumBy.XPATH,
-                    f'.//*[contains(@resource-id,"{SHOP_ID_CL_ITEM_CONTAINER}")]',
-                )
-                row_scored: List[Tuple[int, object]] = []
-                for it in items:
-                    try:
-                        if not it.is_displayed():
-                            continue
-                        y = int(it.location.get("y", 0))
-                        if not (y_lo <= y <= y_hi):
-                            continue
-                        row_scored.append((y, it))
-                    except Exception:
-                        continue
-                row_scored.sort(key=lambda t: t[0])
-                for _, it in row_scored[:4]:
-                    if self.tap_cl_item_open_detail(it):
-                        return True
-            except Exception:
-                pass
+            for _, it in self._card_containers_in_rv(rv, y_lo, y_hi)[:4]:
+                if self.tap_cl_item_open_detail(it):
+                    return True
 
         scored: List[Tuple[int, object]] = []
         if rv:
-            for xpath_inner in (
-                './/*[contains(@resource-id,":id/iv_goods") or '
-                'contains(@resource-id,"iv_goods")]',
-                './/*[contains(@resource-id,":id/image") or contains(@resource-id,"/image")]',
-                './/*[contains(@resource-id,":id/tv_goods_name") or '
-                'contains(@resource-id,"tv_goods_name")]',
-                './/*[contains(@resource-id,":id/tv_price") or '
-                'contains(@resource-id,"tv_price")]',
-            ):
-                try:
-                    for el in rv.find_elements(AppiumBy.XPATH, xpath_inner):
-                        try:
-                            if not el.is_displayed():
-                                continue
-                            if self.mall_list_el_is_add_cart_control(el):
-                                continue
-                            y = int(el.location.get("y", 0))
-                            if not (y_lo <= y <= y_hi):
-                                continue
-                            scored.append((y, el))
-                        except Exception:
-                            continue
-                    if scored:
-                        break
-                except Exception:
-                    continue
+            scored = self._product_info_candidates_in_rv(rv, y_lo, y_hi)
         if not scored:
-            for suf in (
-                SHOP_ID_IV_GOODS,
-                SHOP_ID_TV_GOODS_NAME,
-                SHOP_ID_TV_PRICE,
-                SHOP_ID_IMAGE,
-            ):
-                for el in self._o._all_displayed_by_pkg_id(suf):
-                    try:
-                        if not el.is_displayed():
-                            continue
-                        if self.mall_list_el_is_add_cart_control(el):
-                            continue
-                        y = int(el.location.get("y", 0))
-                        if not (y_lo <= y <= y_hi):
-                            continue
-                        scored.append((y, el))
-                    except Exception:
-                        continue
-                if scored:
-                    break
-        scored.sort(key=lambda t: t[0])
+            scored = self._product_info_candidates_by_ids(y_lo, y_hi)
         for _, el in scored[:6]:
-            if self.mall_list_el_is_add_cart_control(el):
-                continue
-            try:
-                self._o._nearest_clickable_ancestor(el).click()
-            except Exception:
-                try:
-                    el.click()
-                except Exception:
-                    continue
-            logger.info("已点击主列表商品图/信息区进详情")
-            time.sleep(1.85)
-            if self._o._is_mall_product_detail_visible():
+            if self._tap_candidate_into_detail(el):
                 return True
-        w, h2 = self._o._window_size()
-        try:
-            self._o.driver.execute_script(
-                "mobile: clickGesture",
-                {"x": int(w * 0.34), "y": int(h2 * 0.44)},
-            )
-            logger.info("主列表进详情：偏左坐标兜底（避让右侧加购区）")
-            time.sleep(1.85)
-            if self._o._is_mall_product_detail_visible():
-                return True
-        except Exception:
-            pass
+        if self._tap_left_coordinate_fallback():
+            return True
         logger.error("主列表未能进入商品详情")
         return False
 
@@ -257,6 +258,69 @@ class MallProductDetailPage:
             time.sleep(0.9)
         return True
 
+    def _try_collect_on_detail(self) -> None:
+        col = self._o._first_displayed_by_pkg_id(SHOP_ID_IV_COLLECT)
+        if not col:
+            return
+        try:
+            col.click()
+            time.sleep(0.55)
+            if self._o._wait_substring_on_screen(SHOP_TEXT_COLLECT_OK, 3.8):
+                logger.info("已出现「%s」", SHOP_TEXT_COLLECT_OK)
+            else:
+                logger.warning(
+                    "未在界面上捕获「%s」（Toast 可能不在层级中）",
+                    SHOP_TEXT_COLLECT_OK,
+                )
+        except Exception as ex:
+            logger.warning("点击收藏失败: %s", ex)
+
+    def _open_kefu_and_return(self) -> bool:
+        ke = self._o._first_displayed_by_pkg_id(SHOP_ID_MALL_KEFU)
+        if not ke:
+            return True
+        try:
+            self._o._nearest_clickable_ancestor(ke).click()
+            time.sleep(1.15)
+        except Exception as ex:
+            logger.error("点击客服失败: %s", ex)
+            return False
+        ok_ke = self._o._wait_kefu_destination(10.0)
+        if not ok_ke and not self._o._is_mall_product_detail_visible():
+            logger.warning(
+                "未命中客服页固定文案/H5 关键字，但已离开商品详情，视为客服已打开，继续"
+            )
+            ok_ke = True
+        if not ok_ke:
+            logger.error("未识别客服页（仍在详情且无文案/WebView 命中）")
+            self._o.tap_top_back()
+            return False
+        if not self._o.tap_top_back():
+            logger.error("客服页返回失败")
+            return False
+        time.sleep(0.85)
+        return True
+
+    def _open_detail_cart_and_return(self) -> bool:
+        cart = self._o._first_displayed_by_pkg_id(SHOP_ID_MALL_SHOP_CAR_CONTAINER)
+        if not cart:
+            return True
+        try:
+            self._o._nearest_clickable_ancestor(cart).click()
+            time.sleep(1.0)
+        except Exception as ex:
+            logger.error("点击购物车入口失败: %s", ex)
+            return False
+        if not self._o._wait_substring_on_screen(SHOP_TEXT_MALL_CART_TITLE, 4.5):
+            logger.error("未进入标题含「%s」的页面", SHOP_TEXT_MALL_CART_TITLE)
+            self._o.tap_top_back()
+            return False
+        if not self._o.tap_top_back():
+            logger.error("购物车页返回失败")
+            return False
+        time.sleep(0.85)
+        return True
+
     def run_mall_product_detail_deep_flow(self) -> bool:
         if not self._o._is_mall_home_main_list_visible():
             logger.warning("未发现主列表 rv_content，跳过商品详情深度流")
@@ -284,58 +348,11 @@ class MallProductDetailPage:
         if not self.mall_detail_tap_add_to_cart_with_spec():
             return False
         time.sleep(0.45)
-        col = self._o._first_displayed_by_pkg_id(SHOP_ID_IV_COLLECT)
-        if col:
-            try:
-                col.click()
-                time.sleep(0.55)
-                if self._o._wait_substring_on_screen(SHOP_TEXT_COLLECT_OK, 3.8):
-                    logger.info("已出现「%s」", SHOP_TEXT_COLLECT_OK)
-                else:
-                    logger.warning(
-                        "未在界面上捕获「%s」（Toast 可能不在层级中）",
-                        SHOP_TEXT_COLLECT_OK,
-                    )
-            except Exception as ex:
-                logger.warning("点击收藏失败: %s", ex)
-        ke = self._o._first_displayed_by_pkg_id(SHOP_ID_MALL_KEFU)
-        if ke:
-            try:
-                self._o._nearest_clickable_ancestor(ke).click()
-                time.sleep(1.15)
-            except Exception as ex:
-                logger.error("点击客服失败: %s", ex)
-                return False
-            ok_ke = self._o._wait_kefu_destination(10.0)
-            if not ok_ke and not self._o._is_mall_product_detail_visible():
-                logger.warning(
-                    "未命中客服页固定文案/H5 关键字，但已离开商品详情，视为客服已打开，继续"
-                )
-                ok_ke = True
-            if not ok_ke:
-                logger.error("未识别客服页（仍在详情且无文案/WebView 命中）")
-                self._o.tap_top_back()
-                return False
-            if not self._o.tap_top_back():
-                logger.error("客服页返回失败")
-                return False
-            time.sleep(0.85)
-        cart = self._o._first_displayed_by_pkg_id(SHOP_ID_MALL_SHOP_CAR_CONTAINER)
-        if cart:
-            try:
-                self._o._nearest_clickable_ancestor(cart).click()
-                time.sleep(1.0)
-            except Exception as ex:
-                logger.error("点击购物车入口失败: %s", ex)
-                return False
-            if not self._o._wait_substring_on_screen(SHOP_TEXT_MALL_CART_TITLE, 4.5):
-                logger.error("未进入标题含「%s」的页面", SHOP_TEXT_MALL_CART_TITLE)
-                self._o.tap_top_back()
-                return False
-            if not self._o.tap_top_back():
-                logger.error("购物车页返回失败")
-                return False
-            time.sleep(0.85)
+        self._try_collect_on_detail()
+        if not self._open_kefu_and_return():
+            return False
+        if not self._open_detail_cart_and_return():
+            return False
         if not self.mall_detail_tap_buy_now_price_gate():
             return False
         if not self._o.tap_top_back():

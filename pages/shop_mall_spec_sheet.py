@@ -125,9 +125,31 @@ class MallSpecSheet:
         logger.error("多规格弹层未点到「确定/完成」等主按钮")
         return False
 
-    def tap_confirm_button(self) -> bool:
-        h = self._ctx.window_size()[1]
-        y_cut = int(h * 0.32)
+    @staticmethod
+    def _short_bottom_text(el, y_cut: int, *, max_len: int = 10) -> bool:
+        try:
+            if not el.is_displayed():
+                return False
+            if int(el.location.get("y", 0)) < y_cut:
+                return False
+            return len((el.text or "").strip()) <= max_len
+        except Exception:
+            return False
+
+    def _click_confirm_candidate(self, el, desc: str, *, sleep_sec: float = 0.85) -> bool:
+        try:
+            self._ctx.nearest_clickable_ancestor(el).click()
+            logger.info("已点击多规格弹层主按钮（%s）", desc)
+            time.sleep(sleep_sec)
+            return True
+        except Exception:
+            if self._ctx.try_click(el, desc):
+                logger.info("已点击多规格弹层主按钮（%s 自身）", desc)
+                time.sleep(sleep_sec)
+                return True
+        return False
+
+    def _tap_confirm_by_dialog_complete_id(self) -> bool:
         for pkg in self._ctx.shop_packages_prioritized():
             rid = self._ctx.rid(pkg, SHOP_ID_DIALOG_COMPLETE)
             try:
@@ -135,84 +157,59 @@ class MallSpecSheet:
                     try:
                         if not el.is_displayed():
                             continue
-                        self._ctx.nearest_clickable_ancestor(el).click()
-                        logger.info(
-                            "已点击多规格弹层主按钮（dialog_complete 祖先 / %s）",
-                            pkg,
-                        )
-                        time.sleep(0.85)
-                        return True
-                    except Exception:
-                        if self._ctx.try_click(el, "dialog_complete 自身"):
-                            logger.info(
-                                "已点击多规格弹层主按钮（dialog_complete 自身 / %s）",
-                                pkg,
-                            )
-                            time.sleep(0.85)
+                        if self._click_confirm_candidate(el, f"dialog_complete / {pkg}"):
                             return True
+                    except Exception as ex:
+                        logger.debug("dialog_complete 候选跳过: %s", ex)
             except Exception as ex:
                 logger.debug("dialog_complete id 扫描: %s", ex)
+        return False
+
+    def _tap_confirm_by_dialog_complete_xpath(self) -> bool:
         try:
             for el in self._ctx.driver.find_elements(
                 AppiumBy.XPATH,
                 '//*[contains(@resource-id,"dialog_complete")]',
             ):
                 try:
-                    if not el.is_displayed():
-                        continue
-                    self._ctx.nearest_clickable_ancestor(el).click()
-                    logger.info("已点击多规格弹层主按钮（resource-id 含 dialog_complete）")
-                    time.sleep(0.85)
-                    return True
+                    if el.is_displayed() and self._click_confirm_candidate(
+                        el, "resource-id 含 dialog_complete"
+                    ):
+                        return True
                 except Exception:
                     continue
         except Exception as ex:
             logger.debug("dialog_complete XPath: %s", ex)
+        return False
+
+    def _tap_confirm_by_exact_text(self, y_cut: int) -> bool:
         for label in (SHOP_TEXT_FINISH_SPEC, "确定", "加入购物车"):
             try:
                 for el in self._ctx.driver.find_elements(
                     AppiumBy.XPATH, f'//*[@text="{label}"]'
                 ):
-                    try:
-                        if not el.is_displayed():
-                            continue
-                        yy = int(el.location.get("y", 0))
-                        if yy < y_cut:
-                            continue
-                        if label == "加入购物车" and len((el.text or "").strip()) > 10:
-                            continue
-                        self._ctx.nearest_clickable_ancestor(el).click()
-                        logger.info("已点击多规格弹层「%s」（文案+可点祖先）", label)
-                        time.sleep(0.85)
+                    if self._short_bottom_text(el, y_cut) and self._click_confirm_candidate(
+                        el, f"文案 {label}"
+                    ):
                         return True
-                    except Exception:
-                        if self._ctx.try_click(el, f"文案 {label}"):
-                            logger.info("已点击多规格弹层「%s」（文案自身）", label)
-                            time.sleep(0.85)
-                            return True
             except Exception as ex:
                 logger.debug("规格弹层文案 %s: %s", label, ex)
+        return False
+
+    def _tap_confirm_by_contains_text(self, y_cut: int) -> bool:
         for sub, disp in ((SHOP_TEXT_FINISH_SPEC, "完成"), ("确定", "确定")):
             try:
                 xp = f'//*[contains(@text,"{sub}")]'
                 for el in self._ctx.driver.find_elements(AppiumBy.XPATH, xp):
-                    try:
-                        if not el.is_displayed():
-                            continue
-                        tx = (el.text or "").strip()
-                        if len(tx) > 10:
-                            continue
-                        yy = int(el.location.get("y", 0))
-                        if yy < y_cut:
-                            continue
-                        self._ctx.nearest_clickable_ancestor(el).click()
-                        logger.info("已点击多规格弹层「%s」（contains 文案）", disp)
-                        time.sleep(0.85)
+                    if self._short_bottom_text(el, y_cut) and self._click_confirm_candidate(
+                        el, f"contains 文案 {disp}"
+                    ):
                         return True
-                    except Exception:
-                        continue
             except Exception as ex:
                 logger.debug("规格弹层 contains %s: %s", sub, ex)
+        return False
+
+    def _tap_confirm_by_button_text(self, y_cut: int) -> bool:
         try:
             for el in self._ctx.driver.find_elements(
                 AppiumBy.XPATH,
@@ -221,19 +218,17 @@ class MallSpecSheet:
                     'contains(@text,"完成") or contains(@text,"确定")]'
                 ),
             ):
-                try:
-                    if not el.is_displayed():
-                        continue
-                    if int(el.location.get("y", 0)) < y_cut:
-                        continue
-                    if self._ctx.try_click(el, "Button 完成/确定"):
-                        logger.info("已点击多规格弹层主按钮（Button 完成/确定）")
-                        time.sleep(0.85)
-                        return True
-                except Exception:
-                    continue
+                if self._short_bottom_text(el, y_cut) and self._ctx.try_click(
+                    el, "Button 完成/确定"
+                ):
+                    logger.info("已点击多规格弹层主按钮（Button 完成/确定）")
+                    time.sleep(0.85)
+                    return True
         except Exception as ex:
             logger.debug("规格 Button: %s", ex)
+        return False
+
+    def _tap_confirm_by_uiautomator(self) -> bool:
         for label in (SHOP_TEXT_FINISH_SPEC, "确定"):
             try:
                 self._ctx.driver.find_element(
@@ -246,4 +241,18 @@ class MallSpecSheet:
             except Exception as ex:
                 logger.debug("规格 UiAutomator %s: %s", label, ex)
                 continue
+        return False
+
+    def tap_confirm_button(self) -> bool:
+        y_cut = int(self._ctx.window_size()[1] * 0.32)
+        for strategy in (
+            self._tap_confirm_by_dialog_complete_id,
+            self._tap_confirm_by_dialog_complete_xpath,
+            lambda: self._tap_confirm_by_exact_text(y_cut),
+            lambda: self._tap_confirm_by_contains_text(y_cut),
+            lambda: self._tap_confirm_by_button_text(y_cut),
+            self._tap_confirm_by_uiautomator,
+        ):
+            if strategy():
+                return True
         return False

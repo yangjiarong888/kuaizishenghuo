@@ -4,7 +4,7 @@ from __future__ import annotations
 import random
 import re
 import time
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 from appium.webdriver.common.appiumby import AppiumBy
 
@@ -292,6 +292,55 @@ class MallCategoryPage:
                 break
         return inner_el
 
+    @staticmethod
+    def _parse_small_int_text(tx: str) -> Optional[int]:
+        if not re.fullmatch(r"\d{1,4}", (tx or "").strip()):
+            return None
+        val = int(tx.strip())
+        return val if val <= 999 else None
+
+    def _scan_row_textview_qty(self, item_root, x_cut: int) -> Optional[int]:
+        best: Optional[int] = None
+        try:
+            textviews = item_root.find_elements(
+                AppiumBy.CLASS_NAME, "android.widget.TextView"
+            )
+        except Exception:
+            return None
+        for el in textviews:
+            try:
+                if not el.is_displayed():
+                    continue
+                val = self._parse_small_int_text(el.text or "")
+                if val is None:
+                    continue
+                if x_cut and int(el.location.get("x", 0)) < x_cut:
+                    continue
+                best = val
+            except Exception:
+                continue
+        return best
+
+    def _read_qty_by_named_resource(self, item_root) -> Optional[int]:
+        try:
+            elements = item_root.find_elements(
+                AppiumBy.XPATH,
+                './/*[contains(@resource-id,"count") or contains(@resource-id,"qty") '
+                'or contains(@resource-id,"amount") or contains(@resource-id,"number")]',
+            )
+        except Exception:
+            return None
+        for el in elements:
+            try:
+                if not el.is_displayed():
+                    continue
+                m = re.search(r"\d{1,4}", (el.text or "").strip())
+                if m:
+                    return int(m.group(0))
+            except Exception:
+                continue
+        return None
+
     def read_category_row_qty(self, item_root) -> Optional[int]:
         try:
             loc = item_root.location
@@ -304,82 +353,19 @@ class MallCategoryPage:
             row_left, row_w = 0, 0
             x_cut_loose = x_cut_strict = 0
 
-        def _scan_textviews(x_cut: int) -> Optional[int]:
-            best: Optional[int] = None
-            try:
-                for el in item_root.find_elements(
-                    AppiumBy.CLASS_NAME, "android.widget.TextView"
-                ):
-                    try:
-                        if not el.is_displayed():
-                            continue
-                        tx = (el.text or "").strip()
-                        if not re.fullmatch(r"\d{1,4}", tx):
-                            continue
-                        v = int(tx)
-                        if v > 999:
-                            continue
-                        ex = int(el.location.get("x", 0))
-                        if x_cut and ex < x_cut:
-                            continue
-                        best = v
-                    except Exception:
-                        continue
-            except Exception:
-                pass
-            return best
-
         for cut in (x_cut_strict, x_cut_loose):
             if cut:
-                got = _scan_textviews(cut)
+                got = self._scan_row_textview_qty(item_root, cut)
                 if got is not None:
                     return got
 
-        try:
-            for el in item_root.find_elements(
-                AppiumBy.XPATH,
-                './/*[contains(@resource-id,"count") or contains(@resource-id,"qty") '
-                'or contains(@resource-id,"amount") or contains(@resource-id,"number")]',
-            ):
-                try:
-                    if not el.is_displayed():
-                        continue
-                    tx = (el.text or "").strip()
-                    m = re.search(r"\d{1,4}", tx)
-                    if not m:
-                        continue
-                    return int(m.group(0))
-                except Exception:
-                    continue
-        except Exception:
-            pass
+        got = self._read_qty_by_named_resource(item_root)
+        if got is not None:
+            return got
 
         if row_w > 0:
             x_far = row_left + int(row_w * 0.62)
-            try:
-                best2: Optional[int] = None
-                for el in item_root.find_elements(
-                    AppiumBy.CLASS_NAME, "android.widget.TextView"
-                ):
-                    try:
-                        if not el.is_displayed():
-                            continue
-                        tx = (el.text or "").strip()
-                        if not re.fullmatch(r"\d{1,4}", tx):
-                            continue
-                        v = int(tx)
-                        if v > 999:
-                            continue
-                        ex = int(el.location.get("x", 0))
-                        if ex < x_far:
-                            continue
-                        best2 = v
-                    except Exception:
-                        continue
-                if best2 is not None:
-                    return best2
-            except Exception:
-                pass
+            return self._scan_row_textview_qty(item_root, x_far)
         return None
 
     def first_select_spec_button_on_category(self):
@@ -488,6 +474,53 @@ class MallCategoryPage:
                 pass
         return None
 
+    def _find_select_spec_button_with_scroll(self, random_pick: bool):
+        spec_btn = None
+        for attempt in range(12):
+            spec_btn = (
+                self.random_select_spec_button_on_category()
+                if random_pick
+                else self.first_select_spec_button_on_category()
+            )
+            if spec_btn:
+                break
+            if attempt < 11:
+                self._o._swipe_mall_vertical_list_down(
+                    1, 1.0, "分类商品列表(轻翻找选规格)", x_ratio=0.58
+                )
+        return spec_btn
+
+    def _tap_category_spec_button_and_confirm(self, spec_btn) -> bool:
+        try:
+            spec_btn.click()
+        except Exception:
+            try:
+                self._o._nearest_clickable_ancestor(spec_btn).click()
+            except Exception as ex:
+                logger.error("点击「%s」失败: %s", SHOP_TEXT_SELECT_SPEC, ex)
+                return False
+        time.sleep(0.55)
+        if self._o._login_like_screen_visible():
+            logger.error("点「%s」后出现登录页，请先登录", SHOP_TEXT_SELECT_SPEC)
+            return False
+        return self._o._mall_spec_popup_pick_and_confirm()
+
+    def _read_after_qty_for_same_item(self, item, pname: str) -> Optional[int]:
+        if pname:
+            item2 = self.find_goods_item_by_name_substring(pname)
+            if item2:
+                return self.read_category_row_qty(item2)
+        try:
+            return self.read_category_row_qty(item)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _line_qty_increased(before: Optional[int], after: Optional[int]) -> bool:
+        if before is not None and after is not None:
+            return after >= before + 1
+        return before is None and after is not None and after >= 1
+
     def run_category_spec_add_verify_line_qty(
         self, *, random_pick: bool = False, log_prefix: str = "分类"
     ) -> bool:
@@ -500,18 +533,7 @@ class MallCategoryPage:
             except Exception:
                 continue
         self.recover_mall_category_goods_list_to_top()
-        spec_btn = None
-        for attempt in range(12):
-            if random_pick:
-                spec_btn = self.random_select_spec_button_on_category()
-            else:
-                spec_btn = self.first_select_spec_button_on_category()
-            if spec_btn:
-                break
-            if attempt < 11:
-                self._o._swipe_mall_vertical_list_down(
-                    1, 1.0, "分类商品列表(轻翻找选规格)", x_ratio=0.58
-                )
+        spec_btn = self._find_select_spec_button_with_scroll(random_pick)
         if not spec_btn:
             logger.warning(
                 "%s页无「%s」商品，跳过行数量校验段", log_prefix, SHOP_TEXT_SELECT_SPEC
@@ -533,41 +555,17 @@ class MallCategoryPage:
             (pname or "?")[:40],
             before,
         )
-        try:
-            spec_btn.click()
-        except Exception:
-            try:
-                self._o._nearest_clickable_ancestor(spec_btn).click()
-            except Exception as ex2:
-                logger.error("点击「%s」失败: %s", SHOP_TEXT_SELECT_SPEC, ex2)
-                return False
-        time.sleep(0.55)
-        if self._o._login_like_screen_visible():
-            logger.error("点「%s」后出现登录页，请先登录", SHOP_TEXT_SELECT_SPEC)
-            return False
-        if not self._o._mall_spec_popup_pick_and_confirm():
+        if not self._tap_category_spec_button_and_confirm(spec_btn):
             return False
         time.sleep(1.0)
-        after: Optional[int] = None
-        if pname:
-            item2 = self.find_goods_item_by_name_substring(pname)
-            if item2:
-                after = self.read_category_row_qty(item2)
-        if after is None:
-            try:
-                after = self.read_category_row_qty(item)
-            except Exception:
-                after = None
+        after = self._read_after_qty_for_same_item(item, pname)
         logger.info("%s：同一商品行数量(after)=%s", log_prefix, after)
+        if self._line_qty_increased(before, after):
+            logger.info("行数量校验通过：%s → %s", before, after)
+            return True
         if before is not None and after is not None:
-            if after >= before + 1:
-                logger.info("行数量校验通过：%s → %s", before, after)
-                return True
             logger.error("行数量未 +1：before=%s after=%s", before, after)
             return False
-        if before is None and after is not None and after >= 1:
-            logger.info("行数量校验通过（加购前无数，加购后=%s）", after)
-            return True
         logger.warning(
             "行数量解析不完整 before=%s after=%s，请 Inspector 核对数量 TextView",
             before,
