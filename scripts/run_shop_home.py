@@ -13,6 +13,7 @@
   python scripts/run_shop_home.py
   python scripts/run_shop_home.py --session shop_home_demo
   python scripts/run_shop_home.py --quit-driver
+  python scripts/run_shop_home.py --skip-phase kingkong_daily_baihuo --skip-phase detail_cart_banner
 
 说明：流程内含多段「列表滑动 ×5、每次等待约 5s」等，**整段常需数分钟**；执行完会 **正常退出进程**。
 默认 **不会** ``driver.quit()``（便于同一会话继续跑别的脚本）；需要连 Appium 会话一起关掉时加 ``--quit-driver``。
@@ -33,6 +34,7 @@ if str(ROOT) not in sys.path:
 
 from commons.driver import DriverManager
 from commons.logger import setup_logger
+from flows.shop_home_flow import SHOP_HOME_FLOW_PHASE_IDS
 from pages.shop_home_page import ShopHomePage
 
 logger = setup_logger(__name__)
@@ -61,6 +63,17 @@ def main() -> int:
         action="store_true",
         help="流程结束后对该 session 执行 driver.quit（释放 Appium 会话）",
     )
+    parser.add_argument(
+        "--skip-phase",
+        action="append",
+        default=[],
+        metavar="PHASE_ID",
+        help=(
+            "跳过指定阶段（可重复传入）；用于冒烟/调试。"
+            "合法 id：%s"
+            % (", ".join(sorted(SHOP_HOME_FLOW_PHASE_IDS)),)
+        ),
+    )
     args = parser.parse_args()
 
     if args.cold:
@@ -72,7 +85,13 @@ def main() -> int:
 
     logger.info("获取驱动 session=%s …", args.session)
     driver = DriverManager().get_driver(session_name=args.session)
-    ok = ShopHomePage(driver).run_shop_home_flow()
+    skip = set(args.skip_phases) if args.skip_phases else None
+    if skip:
+        unknown = skip - set(SHOP_HOME_FLOW_PHASE_IDS)
+        if unknown:
+            logger.error("未知的 --skip-phase：%s；合法值：%s", unknown, SHOP_HOME_FLOW_PHASE_IDS)
+            return 2
+    ok = ShopHomePage(driver).run_shop_home_flow(skip_phases=skip)
     if args.quit_driver:
         try:
             DriverManager().close_driver(session_name=args.session)
