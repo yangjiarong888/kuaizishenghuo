@@ -107,40 +107,48 @@ class TakeoutPageBase(TakeoutShopMixin):
                 break
         return el
 
-    def _find_bottom_nav_takeout_element(self):
-        """底部「外卖」Tab 可点击元素（排除屏上方同名文案）。"""
-        h = self._window_height()
-        # 部分机型底栏略高，0.72 过严会漏掉 Tab
-        y_min = int(h * 0.68)
+    def _visible_in_bottom_band(self, el, y_min: int) -> bool:
+        try:
+            return el.is_displayed() and int(el.location.get("y", 0)) >= y_min
+        except Exception:
+            return False
+
+    def _first_bottom_band_click_target(self, by: str, value: str, y_min: int):
+        try:
+            for el in self.driver.find_elements(by, value):
+                if self._visible_in_bottom_band(el, y_min):
+                    return self._nearest_clickable_ancestor(el)
+        except Exception:
+            pass
+        return None
+
+    def _find_bottom_tab_by_label_resource_id(self, y_min: int):
         for pkg in _PACKAGES:
             for label in ("外卖", "美食外卖"):
                 xp = (
                     f'//android.widget.TextView[@resource-id="{pkg}:id/tab_text_tv" '
                     f'and @text="{label}"]'
                 )
-                try:
-                    for el in self.driver.find_elements(AppiumBy.XPATH, xp):
-                        try:
-                            if not el.is_displayed():
-                                continue
-                            if int(el.location.get("y", 0)) < y_min:
-                                continue
-                            return self._nearest_clickable_ancestor(el)
-                        except Exception:
-                            continue
-                except Exception:
-                    pass
+                hit = self._first_bottom_band_click_target(
+                    AppiumBy.XPATH, xp, y_min
+                )
+                if hit:
+                    return hit
+        return None
+
+    def _find_bottom_tab_by_icon_slot(self, y_min: int):
         for pkg in _PACKAGES:
             try:
                 els = self.driver.find_elements(
                     AppiumBy.ID, f"{pkg}:id/tab_icon_iv"
                 )
-                if len(els) >= 2:
-                    el = els[1]
-                    if el.is_displayed() and int(el.location.get("y", 0)) >= y_min:
-                        return self._nearest_clickable_ancestor(el)
+                if len(els) >= 2 and self._visible_in_bottom_band(els[1], y_min):
+                    return self._nearest_clickable_ancestor(els[1])
             except Exception:
                 pass
+        return None
+
+    def _find_bottom_tab_by_xpath_candidates(self, y_min: int):
         candidates: Tuple[Tuple[str, str], ...] = (
             (AppiumBy.XPATH, '//android.widget.TextView[@text="外卖"]'),
             (AppiumBy.XPATH, '//android.widget.TextView[@text="美食外卖"]'),
@@ -151,54 +159,46 @@ class TakeoutPageBase(TakeoutShopMixin):
             ),
         )
         for by, xp in candidates:
-            try:
-                for el in self.driver.find_elements(by, xp):
-                    try:
-                        if not el.is_displayed():
-                            continue
-                        y = int(el.location.get("y", 0))
-                        if y >= y_min:
-                            return self._nearest_clickable_ancestor(el)
-                    except Exception:
-                        continue
-            except Exception:
-                pass
+            hit = self._first_bottom_band_click_target(by, xp, y_min)
+            if hit:
+                return hit
+        return None
+
+    def _find_bottom_tab_by_uiautomator(self, y_min: int):
         for text in ("外卖", "美食外卖"):
             uia = f'new UiSelector().text("{text}")'
-            try:
-                for el in self.driver.find_elements(
-                    AppiumBy.ANDROID_UIAUTOMATOR, uia
-                ):
-                    try:
-                        if not el.is_displayed():
-                            continue
-                        y = int(el.location.get("y", 0))
-                        if y >= y_min:
-                            return self._nearest_clickable_ancestor(el)
-                    except Exception:
-                        continue
-            except Exception:
-                pass
+            hit = self._first_bottom_band_click_target(
+                AppiumBy.ANDROID_UIAUTOMATOR, uia, y_min
+            )
+            if hit:
+                return hit
         for needle in ("外卖", "美食外卖"):
             esc = needle.replace('"', '\\"')
             for sel in (
                 f'new UiSelector().descriptionContains("{esc}").clickable(true)',
                 f'new UiSelector().description("{esc}")',
             ):
-                try:
-                    for el in self.driver.find_elements(
-                        AppiumBy.ANDROID_UIAUTOMATOR, sel
-                    ):
-                        try:
-                            if not el.is_displayed():
-                                continue
-                            y = int(el.location.get("y", 0))
-                            if y >= y_min:
-                                return self._nearest_clickable_ancestor(el)
-                        except Exception:
-                            continue
-                except Exception:
-                    pass
+                hit = self._first_bottom_band_click_target(
+                    AppiumBy.ANDROID_UIAUTOMATOR, sel, y_min
+                )
+                if hit:
+                    return hit
+        return None
+
+    def _find_bottom_nav_takeout_element(self):
+        """底部「外卖」Tab 可点击元素（排除屏上方同名文案）。"""
+        h = self._window_height()
+        # 部分机型底栏略高，0.72 过严会漏掉 Tab
+        y_min = int(h * 0.68)
+        for finder in (
+            self._find_bottom_tab_by_label_resource_id,
+            self._find_bottom_tab_by_icon_slot,
+            self._find_bottom_tab_by_xpath_candidates,
+            self._find_bottom_tab_by_uiautomator,
+        ):
+            hit = finder(y_min)
+            if hit:
+                return hit
         return None
 
     def _tap_bottom_takeout_tab_geometry_fallback(self) -> bool:
@@ -720,6 +720,99 @@ class TakeoutPageBase(TakeoutShopMixin):
                 out.append(t)
         return tuple(out)
 
+    def _shop_substring_candidates(self, shop_name: str) -> Tuple[str, ...]:
+        if "WWCS" in shop_name.upper():
+            return ("WWCS", "旺旺超市")
+        if "旺旺" in shop_name:
+            return ("旺旺超市",)
+        return (shop_name[: min(6, len(shop_name))],)
+
+    def _shop_search_needles(self, shop_name: str) -> Tuple[str, ...]:
+        out: list[str] = []
+        for text in self._shop_substring_candidates(shop_name) + self._shop_name_text_variants(
+            shop_name
+        ):
+            if text and text not in out:
+                out.append(text)
+        return tuple(out)
+
+    def _find_row_by_scoped_uia(self, needles: Sequence[str], expired) -> Optional[object]:
+        for pkg in _PACKAGES:
+            if expired():
+                break
+            for needle in needles:
+                if expired():
+                    break
+                el = self._uia_find_tv_merchant_name_contains(pkg, needle)
+                hit = self._shop_row_click_target(el) if el else None
+                if hit:
+                    return hit
+        return None
+
+    def _hit_row_xpath(self, xp: str, expired) -> Optional[object]:
+        if expired():
+            return None
+        el = self._first_displayed(self.driver.find_elements(AppiumBy.XPATH, xp))
+        return self._shop_row_click_target(el)
+
+    def _find_row_by_scoped_xpath(
+        self,
+        texts: Sequence[str],
+        sub_candidates: Sequence[str],
+        expired,
+    ) -> Optional[object]:
+        exact_fns = (
+            _scoped_tv_merchant_name_exact,
+            _scoped_row_tab_content_xpath_exact,
+            _scoped_row_xpath_exact_name,
+            _scoped_shop_title_textview_exact,
+        )
+        contains_fns = (
+            _scoped_tv_merchant_name_contains,
+            _scoped_row_tab_content_xpath_contains,
+            _scoped_row_xpath_contains_name,
+        )
+        for pkg in _PACKAGES:
+            if expired():
+                break
+            for text in texts:
+                for xp_fn in exact_fns:
+                    hit = self._hit_row_xpath(xp_fn(pkg, text), expired)
+                    if hit:
+                        return hit
+            for sub in sub_candidates:
+                for xp_fn in contains_fns:
+                    hit = self._hit_row_xpath(xp_fn(pkg, sub), expired)
+                    if hit:
+                        return hit
+                if len(sub) >= 4:
+                    hit = self._hit_row_xpath(
+                        _scoped_shop_title_textview_contains(pkg, sub), expired
+                    )
+                    if hit:
+                        return hit
+        return None
+
+    def _find_row_by_legacy_xpath(
+        self,
+        texts: Sequence[str],
+        sub_candidates: Sequence[str],
+        expired,
+    ) -> Optional[object]:
+        for xp_fn, values in (
+            (_row_tab_content_xpath_exact, texts),
+            (_row_xpath_exact_name, texts),
+            (_row_tab_content_xpath_contains, sub_candidates),
+            (_row_xpath_contains_name, sub_candidates),
+            (_name_xpath_exact, texts),
+        ):
+            for value in values:
+                for pkg in _PACKAGES:
+                    hit = self._hit_row_xpath(xp_fn(pkg, value), expired)
+                    if hit:
+                        return hit
+        return None
+
     def _find_visible_clickable_row_impl(
         self,
         shop_name: str,
@@ -734,143 +827,19 @@ class TakeoutPageBase(TakeoutShopMixin):
             return time.monotonic() >= t_end
 
         texts = self._shop_name_text_variants(shop_name)
-        if "WWCS" in shop_name.upper():
-            sub_candidates: Tuple[str, ...] = ("WWCS", "旺旺超市")
-        elif "旺旺" in shop_name:
-            sub_candidates = ("旺旺超市",)
-        else:
-            sub_candidates = (shop_name[: min(6, len(shop_name))],)
-
-        needles_uia: list[str] = []
-        for s in sub_candidates:
-            if s and s not in needles_uia:
-                needles_uia.append(s)
-        for t in texts:
-            if t and t not in needles_uia:
-                needles_uia.append(t)
+        sub_candidates = self._shop_substring_candidates(shop_name)
+        needles_uia = self._shop_search_needles(shop_name)
 
         with self._zero_implicit_wait():
-            for pkg in _PACKAGES:
-                if expired():
-                    break
-                for needle in needles_uia:
-                    if expired():
-                        break
-                    el = self._uia_find_tv_merchant_name_contains(pkg, needle)
-                    if el:
-                        hit = self._shop_row_click_target(el)
-                        if hit:
-                            return hit
-
-            def _hit(xp: str) -> Optional[object]:
-                if expired():
-                    return None
-                el = self._first_displayed(
-                    self.driver.find_elements(AppiumBy.XPATH, xp)
-                )
-                return self._shop_row_click_target(el)
-
-            for pkg in _PACKAGES:
-                if expired():
-                    break
-                for text in texts:
-                    for xp_fn in (
-                        _scoped_tv_merchant_name_exact,
-                        _scoped_row_tab_content_xpath_exact,
-                        _scoped_row_xpath_exact_name,
-                        _scoped_shop_title_textview_exact,
-                    ):
-                        if expired():
-                            return None
-                        hit = _hit(xp_fn(pkg, text))
-                        if hit:
-                            return hit
-                for sub in sub_candidates:
-                    if expired():
-                        return None
-                    for xp_fn in (
-                        _scoped_tv_merchant_name_contains,
-                        _scoped_row_tab_content_xpath_contains,
-                        _scoped_row_xpath_contains_name,
-                    ):
-                        if expired():
-                            return None
-                        hit = _hit(xp_fn(pkg, sub))
-                        if hit:
-                            return hit
-                    if len(sub) >= 4:
-                        if expired():
-                            return None
-                        hit = _hit(_scoped_shop_title_textview_contains(pkg, sub))
-                        if hit:
-                            return hit
+            hit = self._find_row_by_scoped_uia(needles_uia, expired)
+            if hit:
+                return hit
+            hit = self._find_row_by_scoped_xpath(texts, sub_candidates, expired)
+            if hit:
+                return hit
 
             if allow_slow_legacy_xpath and not expired():
-                for pkg in _PACKAGES:
-                    if expired():
-                        break
-                    for text in texts:
-                        if expired():
-                            return None
-                        el = self._first_displayed(
-                            self.driver.find_elements(
-                                AppiumBy.XPATH,
-                                _row_tab_content_xpath_exact(pkg, text),
-                            )
-                        )
-                        if el:
-                            return self._shop_row_click_target(el)
-                for pkg in _PACKAGES:
-                    if expired():
-                        break
-                    for text in texts:
-                        if expired():
-                            return None
-                        el = self._first_displayed(
-                            self.driver.find_elements(
-                                AppiumBy.XPATH,
-                                _row_xpath_exact_name(pkg, text),
-                            )
-                        )
-                        if el:
-                            return self._shop_row_click_target(el)
-                for sub in sub_candidates:
-                    for pkg in _PACKAGES:
-                        if expired():
-                            return None
-                        el = self._first_displayed(
-                            self.driver.find_elements(
-                                AppiumBy.XPATH,
-                                _row_tab_content_xpath_contains(pkg, sub),
-                            )
-                        )
-                        if el:
-                            return self._shop_row_click_target(el)
-                    for pkg in _PACKAGES:
-                        if expired():
-                            return None
-                        el = self._first_displayed(
-                            self.driver.find_elements(
-                                AppiumBy.XPATH,
-                                _row_xpath_contains_name(pkg, sub),
-                            )
-                        )
-                        if el:
-                            return self._shop_row_click_target(el)
-                for pkg in _PACKAGES:
-                    if expired():
-                        break
-                    for text in texts:
-                        if expired():
-                            return None
-                        el = self._first_displayed(
-                            self.driver.find_elements(
-                                AppiumBy.XPATH,
-                                _name_xpath_exact(pkg, text),
-                            )
-                        )
-                        if el:
-                            return self._shop_row_click_target(el)
+                return self._find_row_by_legacy_xpath(texts, sub_candidates, expired)
         return None
 
     def _swipe_merchant_list_once(self) -> None:
@@ -900,6 +869,26 @@ class TakeoutPageBase(TakeoutShopMixin):
             except Exception:
                 pass
 
+    def _click_shop_row_and_wait(self, el, success_log: str, *args) -> bool:
+        if not el:
+            return False
+        try:
+            el.click()
+            logger.info(success_log, *args)
+            time.sleep(1.2)
+            return True
+        except Exception as ex:
+            logger.warning("点击店铺元素失败: %s", ex)
+            return False
+
+    def _find_and_click_shop_on_current_screen(
+        self, shop_name: str, find_budget_sec: float, success_log: str, *args
+    ) -> bool:
+        el = self._find_visible_clickable_row(
+            shop_name, find_budget_sec=find_budget_sec
+        )
+        return self._click_shop_row_and_wait(el, success_log, *args)
+
     def scroll_to_and_open_shop(
         self,
         shop_name: str = "旺旺超市 WWCS",
@@ -920,67 +909,47 @@ class TakeoutPageBase(TakeoutShopMixin):
             shop_name,
             _shop_find_budget,
         )
-        el = self._find_visible_clickable_row(
-            shop_name, find_budget_sec=_shop_find_budget
-        )
-        if el:
-            try:
-                el.click()
-                logger.info("已点击店铺行/店名（当前屏可见，未先滚列表），等待进入详情…")
-                time.sleep(1.2)
-                return True
-            except Exception as ex:
-                logger.warning("点击店铺元素失败: %s", ex)
+        if self._find_and_click_shop_on_current_screen(
+            shop_name,
+            _shop_find_budget,
+            "已点击店铺行/店名（当前屏可见，未先滚列表），等待进入详情…",
+        ):
+            return True
 
         logger.info("当前屏未见目标店，先手势翻列表（避免易触发刷新的中线滑动）…")
         for pre_i in range(6):
             self._swipe_merchant_list_once()
             time.sleep(0.32)
-            el = self._find_visible_clickable_row(
-                shop_name, find_budget_sec=_shop_find_budget
-            )
-            if el:
-                try:
-                    el.click()
-                    logger.info(
-                        "已点击店铺行/店名（预滑动第 %d 次后可见），等待进入详情…",
-                        pre_i + 1,
-                    )
-                    time.sleep(1.2)
-                    return True
-                except Exception as ex:
-                    logger.warning("点击店铺元素失败: %s", ex)
+            if self._find_and_click_shop_on_current_screen(
+                shop_name,
+                _shop_find_budget,
+                "已点击店铺行/店名（预滑动第 %d 次后可见），等待进入详情…",
+                pre_i + 1,
+            ):
+                return True
 
         logger.info("预滑动未见店，再尝试 UiScrollable（次数已收紧）…")
         self._try_scroll_merchant_list(shop_name)
         time.sleep(settle_sec)
 
-        el = self._find_visible_clickable_row(
-            shop_name, find_budget_sec=_shop_find_budget
-        )
-        if el:
-            try:
-                el.click()
-                logger.info("已点击店铺行/店名，等待进入详情…")
-                time.sleep(1.2)
-                return True
-            except Exception as ex:
-                logger.warning("点击店铺元素失败: %s", ex)
+        if self._find_and_click_shop_on_current_screen(
+            shop_name,
+            _shop_find_budget,
+            "已点击店铺行/店名，等待进入详情…",
+        ):
+            return True
 
         for i in range(max_swipes):
             self._swipe_merchant_list_once()
             time.sleep(0.45)
-            el = self._find_visible_clickable_row(
-                shop_name, find_budget_sec=_shop_find_budget
-            )
-            if el:
-                try:
-                    el.click()
-                    logger.info("兜底滑动第 %d 次后已点击店铺「%s」", i + 1, shop_name)
-                    time.sleep(1.2)
-                    return True
-                except Exception:
-                    pass
+            if self._find_and_click_shop_on_current_screen(
+                shop_name,
+                _shop_find_budget,
+                "兜底滑动第 %d 次后已点击店铺「%s」",
+                i + 1,
+                shop_name,
+            ):
+                return True
 
         logger.info(
             "快路径未命中「%s」，最后一次允许全页 XPath（限时约 25s）…",
@@ -991,14 +960,10 @@ class TakeoutPageBase(TakeoutShopMixin):
             allow_slow_legacy_xpath=True,
             find_budget_sec=25.0,
         )
-        if el:
-            try:
-                el.click()
-                logger.info("全页慢路径命中后已点击店铺「%s」", shop_name)
-                time.sleep(1.2)
-                return True
-            except Exception as ex:
-                logger.warning("点击店铺元素失败: %s", ex)
+        if self._click_shop_row_and_wait(
+            el, "全页慢路径命中后已点击店铺「%s」", shop_name
+        ):
+            return True
 
         logger.error("未找到或未点到店铺「%s」，请确认已在外卖 Tab 且列表 id 仍为 rv_merchant", shop_name)
         return False

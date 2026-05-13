@@ -3002,25 +3002,7 @@ class TakeoutShopMixin:
         # 底部橙色「提交」多在 ~0.55h 以下；上沿略抬高减少误点列表中部近义文案
         y_min = int(h * 0.55)
         y_max = int(h * 0.93)
-        modal_visible = False
-        for xp in (
-            '//*[contains(@text,"请选择取消订单原因")]',
-            '//*[contains(@content-desc,"请选择取消订单原因")]',
-            '//*[contains(@text,"取消订单")]',
-        ):
-            try:
-                for el in self.driver.find_elements(AppiumBy.XPATH, xp):
-                    try:
-                        if el.is_displayed():
-                            modal_visible = True
-                            break
-                    except Exception:
-                        continue
-            except Exception:
-                pass
-            if modal_visible:
-                break
-        if not modal_visible:
+        if not self._cancel_reason_modal_visible_for_submit():
             logger.warning("未检测到取消原因弹窗标题，跳过 Native 提交点击以避免误触蒙层")
             return False
         # 优先限定在弹窗语义范围内找提交，降低误点主页面/蒙层风险
@@ -3171,6 +3153,24 @@ class TakeoutShopMixin:
                 )
             except Exception:
                 continue
+        return False
+
+    def _cancel_reason_modal_visible_for_submit(self) -> bool:
+        """提交取消原因前的宽松弹层检测；含标题和取消订单文案。"""
+        for xp in (
+            '//*[contains(@text,"请选择取消订单原因")]',
+            '//*[contains(@content-desc,"请选择取消订单原因")]',
+            '//*[contains(@text,"取消订单")]',
+        ):
+            try:
+                for el in self.driver.find_elements(AppiumBy.XPATH, xp):
+                    try:
+                        if el.is_displayed():
+                            return True
+                    except Exception:
+                        continue
+            except Exception:
+                pass
         return False
     
     def _tap_cancel_order_submit(
