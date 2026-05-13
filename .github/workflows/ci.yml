@@ -12,17 +12,17 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install -U pip && pip install -r requirements.txt
+        run: python -m pip install -U pip && python -m pip install -r requirements.txt
 
       - name: Byte-compile (syntax check)
         run: python -m compileall -q commons pages testcases scripts
 
       - name: Pytest collect-only (imports / fixtures resolvable)
-        run: pytest testcases --collect-only -q
+        run: python -m pytest testcases --collect-only -q
