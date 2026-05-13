@@ -88,7 +88,7 @@ class TakeoutPageBase(TakeoutShopMixin):
                 for el in self.driver.find_elements(AppiumBy.ID, rid):
                     try:
                         if el.is_displayed():
-                return True
+                            return True
                     except Exception:
                         continue
             except Exception:
@@ -161,7 +161,7 @@ class TakeoutPageBase(TakeoutShopMixin):
                             return self._nearest_clickable_ancestor(el)
                     except Exception:
                         continue
-        except Exception:
+            except Exception:
                 pass
         for text in ("外卖", "美食外卖"):
             uia = f'new UiSelector().text("{text}")'
@@ -261,7 +261,6 @@ class TakeoutPageBase(TakeoutShopMixin):
                 logger.warning("未定位到底部外卖 Tab（第 %d 次），可检查底部栏文案/结构", i + 1)
                 if self._tap_bottom_takeout_tab_geometry_fallback():
                     logger.info("坐标兜底后已出现商家列表")
-        return True
 
             time.sleep(settle_sec)
             try:
@@ -345,12 +344,12 @@ class TakeoutPageBase(TakeoutShopMixin):
                         try:
                             target.click()
                             logger.info("已点击顶栏定位（可点击祖先）%s", tid)
-        return True
+                            return True
                         except Exception:
                             try:
                                 el.click()
                                 logger.info("已直接点击 %s", tid)
-            return True
+                                return True
                             except Exception:
                                 pass
             except Exception:
@@ -1002,7 +1001,7 @@ class TakeoutPageBase(TakeoutShopMixin):
                 logger.warning("点击店铺元素失败: %s", ex)
 
         logger.error("未找到或未点到店铺「%s」，请确认已在外卖 Tab 且列表 id 仍为 rv_merchant", shop_name)
-            return False
+        return False
 
     def wait_merchant_list_present(self, timeout: Optional[float] = None) -> bool:
         """等待任一包名下的 rv_merchant 出现。"""
