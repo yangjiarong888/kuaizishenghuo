@@ -43,6 +43,7 @@ class MallSpecSheet:
             SHOP_TEXT_FINISH_SPEC,
             "取消",
             "加入购物车",
+            "立即购买",
             "规格",
             "数量",
             "库存",
@@ -183,7 +184,7 @@ class MallSpecSheet:
         return False
 
     def _tap_confirm_by_exact_text(self, y_cut: int) -> bool:
-        for label in (SHOP_TEXT_FINISH_SPEC, "确定", "加入购物车"):
+        for label in (SHOP_TEXT_FINISH_SPEC, "确定", "加入购物车", "立即购买"):
             try:
                 for el in self._ctx.driver.find_elements(
                     AppiumBy.XPATH, f'//*[@text="{label}"]'
@@ -197,7 +198,11 @@ class MallSpecSheet:
         return False
 
     def _tap_confirm_by_contains_text(self, y_cut: int) -> bool:
-        for sub, disp in ((SHOP_TEXT_FINISH_SPEC, "完成"), ("确定", "确定")):
+        for sub, disp in (
+            (SHOP_TEXT_FINISH_SPEC, "完成"),
+            ("确定", "确定"),
+            ("立即购买", "立即购买"),
+        ):
             try:
                 xp = f'//*[contains(@text,"{sub}")]'
                 for el in self._ctx.driver.find_elements(AppiumBy.XPATH, xp):
@@ -215,7 +220,7 @@ class MallSpecSheet:
                 AppiumBy.XPATH,
                 (
                     '//android.widget.Button['
-                    'contains(@text,"完成") or contains(@text,"确定")]'
+                    'contains(@text,"完成") or contains(@text,"确定") or contains(@text,"立即购买")]'
                 ),
             ):
                 if self._short_bottom_text(el, y_cut) and self._ctx.try_click(
@@ -229,7 +234,7 @@ class MallSpecSheet:
         return False
 
     def _tap_confirm_by_uiautomator(self) -> bool:
-        for label in (SHOP_TEXT_FINISH_SPEC, "确定"):
+        for label in (SHOP_TEXT_FINISH_SPEC, "确定", "立即购买"):
             try:
                 self._ctx.driver.find_element(
                     AppiumBy.ANDROID_UIAUTOMATOR,

@@ -67,6 +67,29 @@ SHOP_ID_TV_GOODS_NAME: str = "tv_goods_name"
 SHOP_ID_TV_PRICE: str = "tv_price"
 SHOP_ID_IMAGE: str = "image"
 
+# 商城搜索 / IM / 分享：不同版本资源名差异较大，脚本按后缀多路兜底
+SHOP_SEARCH_ID_SUFFIXES: Tuple[str, ...] = (
+    "et_search",
+    "ll_search",
+    "iv_search",
+    "tv_search",
+    "mall_search",
+    "search_layout",
+)
+SHOP_IM_INPUT_ID_SUFFIXES: Tuple[str, ...] = (
+    "et_input",
+    "et_content",
+    "et_message",
+    "chat_input",
+    "input",
+)
+SHOP_SHARE_ID_SUFFIXES: Tuple[str, ...] = (
+    "iv_share",
+    "mall_share",
+    "mall_share_container",
+    "share",
+)
+
 # 商品详情页（com.bs.feifubao / com.bs.feifuban 等）
 SHOP_ID_MALL_DETAIL_VIEWPAGER: str = "mall_detail_viewpager"
 SHOP_ID_MALL_ADD_SHOP_CAR: str = "mall_add_shop_car"
@@ -74,6 +97,9 @@ SHOP_ID_MALL_BUY_NOW: str = "mall_buy_now"
 SHOP_ID_IV_COLLECT: str = "iv_collect"
 SHOP_ID_MALL_KEFU: str = "mall_kefu"
 SHOP_ID_MALL_SHOP_CAR_CONTAINER: str = "mall_shop_car_container"
+SHOP_ID_MALL_DETAIL_MORE: str = "mall_detail_more"
+SHOP_ID_MALL_ACTIVITY: str = "mall_activity"
+SHOP_ID_MALL_ACTIVITY_INFO: str = "mall_activity_info"
 SHOP_ID_DIALOG_CHOOSE_CONTAINER: str = "dialog_choose_container"
 SHOP_ID_CHOOSE_SKU_CONTAINER: str = "choose_sku_container"
 SHOP_ID_COUNT_ADD: str = "count_add"
