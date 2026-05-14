@@ -14,7 +14,7 @@ login.page.py - Appium 登录自动化脚本入口
   python login.page.py --method phone --phone 19860207026
   python login.page.py --method phone --code 123456   # 非交互：直接传入短信验证码
 
-账号密码默认写在文件里的 DEFAULT_LOGIN_PHONE / DEFAULT_LOGIN_PASSWORD；也可用 --phone / --password 临时覆盖。
+账号密码默认来自 LoginData（环境变量 LOGIN_DEFAULT_PHONE / LOGIN_DEFAULT_PASSWORD 优先，否则为代码内占位默认值）；也可用 --phone / --password 临时覆盖。
 验证码登录：未传 --code 时默认在终端 input() 手动输入短信码（page_source 易含误匹配数字，已不再默认从页面自动猜码）。
 若需恢复从页面正则猜码（不推荐），可设环境变量 LOGIN_SMS_PARSE_CODE_FROM_PAGE=1。
 
@@ -35,10 +35,6 @@ from commons.logger import setup_logger
 
 
 logger = setup_logger(__name__)
-
-# ========== 密码登录 / 忘记密码：在此改账号密码（也可用命令行 --phone / --password 覆盖）==========
-DEFAULT_LOGIN_PHONE = "19860207026"
-DEFAULT_LOGIN_PASSWORD = "qqqyyyaaa"
 
 
 def main():
@@ -66,12 +62,12 @@ def main():
     parser.add_argument(
         "--phone",
         default=None,
-        help="登录手机号/账号（默认用本文件顶部 DEFAULT_LOGIN_PHONE）",
+        help="登录手机号/账号（不设则用环境变量 LOGIN_DEFAULT_PHONE 或 LoginData 内置默认）",
     )
     parser.add_argument(
         "--password",
         default=None,
-        help="登录密码（默认用本文件顶部 DEFAULT_LOGIN_PASSWORD）",
+        help="登录密码（不设则用环境变量 LOGIN_DEFAULT_PASSWORD 或 LoginData 内置默认）",
     )
     parser.add_argument(
         "--code",
@@ -81,10 +77,12 @@ def main():
     args = parser.parse_args()
 
     session_name = f"login_{args.method}"
-    data = LoginData(
-        phone=(args.phone or DEFAULT_LOGIN_PHONE),
-        password=(args.password or DEFAULT_LOGIN_PASSWORD),
-    )
+    data_kw = {}
+    if args.phone:
+        data_kw["phone"] = args.phone.strip()
+    if args.password:
+        data_kw["password"] = args.password
+    data = LoginData(**data_kw)
     if args.code:
         data.verification_code = args.code.strip()
     page = LoginPage(session_name=session_name, data=data)

@@ -28,10 +28,6 @@ from pages.login_page import LoginData, LoginPage
 logger = setup_logger(__name__)
 SESSION_NAME = "login_password_standalone"
 
-# ========== 在此填写账号密码（也可用命令行 --phone / --password 覆盖）==========
-DEFAULT_LOGIN_PHONE = "19860207026"
-DEFAULT_LOGIN_PASSWORD = "qqqyyyaaa"
-
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="仅执行账号密码登录")
@@ -40,14 +36,24 @@ def main() -> int:
         action="store_true",
         help="已在登录相关页时使用，跳过首页「立即登录」",
     )
-    parser.add_argument("--phone", default=None, help="覆盖默认账号/手机号（否则用 LoginData 默认值）")
-    parser.add_argument("--password", default=None, help="覆盖默认密码")
+    parser.add_argument(
+        "--phone",
+        default=None,
+        help="覆盖默认手机号（不设则用环境变量 LOGIN_DEFAULT_PHONE 或 LoginData 内置默认）",
+    )
+    parser.add_argument(
+        "--password",
+        default=None,
+        help="覆盖默认密码（不设则用环境变量 LOGIN_DEFAULT_PASSWORD 或 LoginData 内置默认）",
+    )
     args = parser.parse_args()
 
-    data = LoginData(
-        phone=(args.phone or DEFAULT_LOGIN_PHONE),
-        password=(args.password or DEFAULT_LOGIN_PASSWORD),
-    )
+    data_kw = {}
+    if args.phone:
+        data_kw["phone"] = args.phone.strip()
+    if args.password:
+        data_kw["password"] = args.password
+    data = LoginData(**data_kw)
 
     page = LoginPage(session_name=SESSION_NAME, data=data)
     try:

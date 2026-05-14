@@ -1,14 +1,8 @@
 """账号密码登录与忘记密码流程。"""
 from __future__ import annotations
 
-import os
-import re
 import time
-from typing import Iterable, Optional, Tuple
-
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, WebDriverException
+from typing import Optional, Tuple
 
 from appium.webdriver.common.appiumby import AppiumBy
 
@@ -18,6 +12,7 @@ from pages.login.data import Locator
 from pages.login.env import _post_login_subpage_escape_enabled
 
 logger = setup_logger("pages.login")
+
 
 class LoginPasswordMixin:
     # ============ 4) 账号密码登录 ============
@@ -206,10 +201,7 @@ class LoginPasswordMixin:
 
     def _verify_logged_in(self) -> bool:
         """登录成功后验证：完成「我的 -> 我的余额（账户余额）」链路。"""
-        logger.info(
-            "开始登录成功断言「我的→我的余额」"
-            "含固定等待与轮询重试"
-        )
+        logger.info("开始登录成功断言「我的→我的余额」，含固定等待与轮询重试")
         deadline = time.time() + 55
         while time.time() < deadline:
             self.handle_popup_strict_after_login()
@@ -337,5 +329,7 @@ class LoginPasswordMixin:
         if success:
             return True
 
-        logger.warning("[WARN] 未检测到‘密码修改成功’提示（可能文案不同）")
-        return True
+        logger.warning(
+            "[WARN] 未检测到「密码修改成功」类提示；请核对文案或补充 XPath。流程未确认完成，返回失败。"
+        )
+        return False

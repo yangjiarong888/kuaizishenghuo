@@ -24,5 +24,4 @@ class TestLogin:
             self.login_page.forget_password()
 
         with allure.step("2. 验证跳转到忘记密码页面"):
-            # 这里可以添加忘记密码页面的验证
-            pass
+            assert self.login_page.forget_password(), "忘记密码流程未返回成功"
