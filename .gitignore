@@ -173,6 +173,7 @@ cython_debug/
 # Local Appium/ADB diagnostics
 current_*.xml
 current_order.png
+shop_*_current.xml
 
 # PyPI configuration file
 .pypirc
