@@ -33,6 +33,19 @@ logger = setup_logger(__name__)
 
 class TakeoutCancelOrderMixin:
 
+    def _cancel_driver_query_unreliable(self, exc: BaseException) -> bool:
+        msg = (getattr(exc, "msg", None) or str(exc)).lower()
+        keys = (
+            "instrumentation process is not running",
+            "cannot be proxied to uiautomator2",
+            "socket hang up",
+            "could not proxy",
+            "connection reset",
+            "econnreset",
+            "session is either terminated",
+        )
+        return any(k in msg for k in keys)
+
     def _switch_context_safe(self, context_name: str) -> bool:
         try:
             cur = getattr(self.driver, "current_context", None)
@@ -287,21 +300,53 @@ class TakeoutCancelOrderMixin:
                 return True
         except Exception:
             pass
-        # 坐标兜底：偏中下轴、避免最底缘（易点穿到蒙层关弹窗）
+        # Appium 元素定位偶发拿不到 Flutter 语义节点时，从 page_source 的 bounds
+        # 直接解析「提交」主按钮。实测取消原因弹层的提交按钮在 0.70h~0.78h。
+        try:
+            src = self.driver.page_source or ""
+            bounds_hits: List[Tuple[int, int, int, int]] = []
+            for m in re.finditer(r"<node\b[^>]*>", src):
+                tag = m.group(0)
+                if "提交" not in tag:
+                    continue
+                bm = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', tag)
+                if not bm:
+                    continue
+                x1, y1, x2, y2 = (int(v) for v in bm.groups())
+                bw, bh = x2 - x1, y2 - y1
+                cy = (y1 + y2) // 2
+                if not (int(h * 0.64) <= cy <= int(h * 0.82)):
+                    continue
+                if bw < int(w * 0.45) or bh < int(h * 0.025):
+                    continue
+                bounds_hits.append((x1, y1, x2, y2))
+            bounds_hits.sort(key=lambda r: (-(r[2] - r[0]), r[1]))
+            for x1, y1, x2, y2 in bounds_hits[:3]:
+                cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+                self.driver.execute_script(
+                    "mobile: clickGesture", {"x": cx, "y": cy}
+                )
+                logger.info("取消弹窗提交 bounds 兜底 (%d,%d)", cx, cy)
+                time.sleep(0.52)
+                if not self._cancel_reason_modal_title_visible():
+                    return True
+        except Exception:
+            pass
+        # 坐标兜底：按取消原因弹层实际主按钮高度点，避免点到弹层下方。
         for xf, yf in (
-            (0.50, 0.875),
-            (0.50, 0.86),
-            (0.50, 0.84),
-            (0.50, 0.82),
-            (0.48, 0.87),
-            (0.52, 0.87),
-            (0.46, 0.84),
-            (0.54, 0.84),
+            (0.50, 0.73),
+            (0.50, 0.745),
+            (0.50, 0.76),
+            (0.48, 0.735),
+            (0.52, 0.735),
+            (0.46, 0.75),
+            (0.54, 0.75),
+            (0.50, 0.78),
         ):
             cx, cy = int(w * xf), int(h * yf)
             if not (int(w * 0.28) <= cx <= int(w * 0.72)):
                 continue
-            if not (int(h * 0.76) <= cy <= int(h * 0.902)):
+            if not (int(h * 0.68) <= cy <= int(h * 0.84)):
                 continue
             try:
                 self.driver.execute_script(
@@ -745,10 +790,23 @@ class TakeoutCancelOrderMixin:
                                 return True
                             if tx == "取消订单" and len(cd) < 200:
                                 return True
+                        except WebDriverException as ex:
+                            if self._cancel_driver_query_unreliable(ex):
+                                logger.warning(
+                                    "检查取消入口时驱动不可用，不能判定入口已消失: %s",
+                                    ex,
+                                )
+                                return True
+                            continue
                         except Exception:
                             continue
-        except Exception:
-            pass
+        except WebDriverException as ex:
+            if self._cancel_driver_query_unreliable(ex):
+                logger.warning("Native 检查取消入口失败，不能判定入口已消失: %s", ex)
+                return True
+        except Exception as ex:
+            logger.debug("Native 检查取消入口异常，保守视为仍需确认: %s", ex)
+            return True
         for wctx in self._iter_webview_contexts():
             try:
                 if not self._switch_context_safe(wctx):
@@ -758,8 +816,23 @@ class TakeoutCancelOrderMixin:
                         try:
                             if el.is_displayed():
                                 return True
+                        except WebDriverException as ex:
+                            if self._cancel_driver_query_unreliable(ex):
+                                logger.warning(
+                                    "WebView 检查取消入口时驱动不可用，不能判定入口已消失: %s",
+                                    ex,
+                                )
+                                self._switch_context_safe("NATIVE_APP")
+                                return True
+                            continue
                         except Exception:
                             continue
+            except WebDriverException as ex:
+                if self._cancel_driver_query_unreliable(ex):
+                    logger.warning("WebView 检查取消入口失败，不能判定入口已消失: %s", ex)
+                    self._switch_context_safe("NATIVE_APP")
+                    return True
+                continue
             except Exception:
                 continue
         self._switch_context_safe("NATIVE_APP")
@@ -810,6 +883,7 @@ class TakeoutCancelOrderMixin:
         )
         end = time.time() + timeout
         it = 0
+        cancel_entry_absent_count = 0
         while time.time() < end:
             it += 1
             try:
@@ -850,9 +924,16 @@ class TakeoutCancelOrderMixin:
                 except Exception:
                     continue
             if not self._cancel_order_entry_still_visible():
-                logger.info("取消结果校验：已不再显示「取消订单」入口")
-                self._switch_context_safe("NATIVE_APP")
-                return True
+                cancel_entry_absent_count += 1
+                logger.info(
+                    "取消结果校验：第 %d 次未见「取消订单」入口，继续确认",
+                    cancel_entry_absent_count,
+                )
+                if cancel_entry_absent_count >= 3:
+                    self._switch_context_safe("NATIVE_APP")
+                    return True
+            else:
+                cancel_entry_absent_count = 0
             if it % 7 == 0:
                 try:
                     src = (self.driver.page_source or "")

@@ -224,6 +224,38 @@ class TakeoutPageBase(TakeoutShopMixin):
                 continue
         return False
 
+    def _backtrack_to_takeout_home(self, max_backs: int = 2) -> bool:
+        """If currently inside a shop/detail page, go back until the merchant list is visible."""
+        for i in range(max_backs):
+            try:
+                self.driver.back()
+                logger.info("未见底栏外卖 Tab，先返回上一层（第 %d 次）", i + 1)
+            except Exception as ex:
+                logger.warning("返回上一层失败: %s", ex)
+                return False
+            time.sleep(0.8)
+            try:
+                if self.is_on_takeout_merchant_home():
+                    logger.info("返回后已看到外卖商家列表")
+                    return True
+            except WebDriverException as ex:
+                if self._requires_new_driver_session(ex):
+                    self._driver_uia2_mark_dead()
+                    logger.error("返回检测外卖首页失败（UiAutomator2 不可用）：%s", ex)
+                    return False
+                if not self._is_transient_driver_error(ex):
+                    raise
+        return False
+
+    def _looks_inside_takeout_shop(self) -> bool:
+        """Cheap page-source signal for shop/detail/cart pages where bottom tabs are hidden."""
+        try:
+            src = self.driver.page_source or ""
+        except Exception:
+            return False
+        needles = ("购物车", "去结算", "起送", "配送费", "选规格", "加入购物车")
+        return any(n in src for n in needles)
+
     def ensure_takeout_tab(
         self,
         settle_sec: float = 1.2,
@@ -248,6 +280,11 @@ class TakeoutPageBase(TakeoutShopMixin):
                 return False
             raise
 
+        if self._looks_inside_takeout_shop():
+            logger.info("当前像店铺详情/购物车页，先返回外卖商家列表")
+            if self._backtrack_to_takeout_home():
+                return True
+
         logger.info("当前不在外卖首页，尝试切换到底部「外卖」Tab…")
         for i in range(max_tab_clicks):
             tab_el = self._find_bottom_nav_takeout_element()
@@ -259,6 +296,15 @@ class TakeoutPageBase(TakeoutShopMixin):
                     logger.warning("点击外卖 Tab 失败: %s", ex)
             else:
                 logger.warning("未定位到底部外卖 Tab（第 %d 次），可检查底部栏文案/结构", i + 1)
+                if i == 0 and self._backtrack_to_takeout_home():
+                    return True
+                tab_el = self._find_bottom_nav_takeout_element()
+                if tab_el:
+                    try:
+                        tab_el.click()
+                        logger.info("返回后已点击底部外卖 Tab")
+                    except Exception as ex:
+                        logger.warning("返回后点击外卖 Tab 失败: %s", ex)
                 if self._tap_bottom_takeout_tab_geometry_fallback():
                     logger.info("坐标兜底后已出现商家列表")
 
@@ -522,7 +568,7 @@ class TakeoutPageBase(TakeoutShopMixin):
         list_resource_id: str,
         shop_name: str,
         use_contains: bool,
-        max_search_swipes: int = 12,
+        max_search_swipes: int = 4,
     ) -> bool:
         """在指定 resourceId 列表内 UiScrollable.scrollIntoView 到店名。"""
         safe = shop_name.replace('"', '\\"')
@@ -530,7 +576,7 @@ class TakeoutPageBase(TakeoutShopMixin):
             target = f'new UiSelector().textContains("{safe}")'
         else:
             target = f'new UiSelector().text("{safe}")'
-        ms = max(5, min(int(max_search_swipes), 14))
+        ms = max(1, min(int(max_search_swipes), 8))
         uia = (
             f'new UiScrollable(new UiSelector().resourceId("{list_resource_id}"))'
             f".setMaxSearchSwipes({ms}).scrollIntoView({target})"
@@ -548,28 +594,22 @@ class TakeoutPageBase(TakeoutShopMixin):
         use_contains: bool,
         shop_name: str,
         log_hint: str,
+        max_search_swipes: int = 4,
     ) -> bool:
         """UiScrollable 后必须用 XPath 确认屏上可见可点击店行。"""
         logger.info("UiScrollable：在 %s 中 %s …", rid, log_hint)
-        if not self._uia_scroll_into_view(rid, uia_label, use_contains):
+        if not self._uia_scroll_into_view(
+            rid, uia_label, use_contains, max_search_swipes=max_search_swipes
+        ):
             return False
         time.sleep(0.45)
-        if self._find_visible_clickable_row(shop_name):
+        if self._find_visible_clickable_row(shop_name, find_budget_sec=1.5):
             logger.info(
                 "UiScrollable 后已确认屏上可见可点击店行「%s」（%s）",
                 shop_name,
                 rid,
             )
             return True
-        if self._uia_scroll_into_view(rid, uia_label, use_contains):
-            time.sleep(0.35)
-            if self._find_visible_clickable_row(shop_name):
-                logger.info(
-                    "UiScrollable 第二次后已确认可见「%s」（%s）",
-                    shop_name,
-                    rid,
-                )
-                return True
         logger.info(
             "UiScrollable 后仍未见可点击店行「%s」（%s），改用手势列表滑动",
             shop_name,
@@ -577,9 +617,19 @@ class TakeoutPageBase(TakeoutShopMixin):
         )
         return False
 
+    def _active_package_candidates(self) -> Tuple[str, ...]:
+        """Current package first; avoid expensive scans on inactive package flavors."""
+        try:
+            current = (self.driver.current_package or "").strip()
+        except Exception:
+            current = ""
+        if current in _PACKAGES:
+            return (current,)
+        return (_PACKAGES[0],)
+
     def _try_scroll_merchant_list(self, shop_name: str) -> bool:
         """UiScrollable 多策略找店，成功以屏上 XPath 为准。"""
-        for pkg in _PACKAGES:
+        for pkg in self._active_package_candidates():
             rid = _merchant_list_rid(pkg)
             if self._scroll_merchant_uia_then_verify_row(
                 rid,
@@ -597,7 +647,7 @@ class TakeoutPageBase(TakeoutShopMixin):
                 f'textContains「{shop_name}」',
             ):
                 return True
-        for pkg in _PACKAGES:
+        for pkg in self._active_package_candidates():
             rid = _merchant_list_rid(pkg)
             if self._scroll_merchant_uia_then_verify_row(
                 rid,
@@ -902,7 +952,8 @@ class TakeoutPageBase(TakeoutShopMixin):
         if ensure_takeout_tab_first and not self.ensure_takeout_tab():
             return False
 
-        _shop_find_budget = 5.0
+        _shop_find_budget = 3.0
+        _shop_quick_budget = 1.2
         logger.info(
             "当前屏查找「%s」（限时约 %.0fs：UiAutomator + 列表内 XPath；"
             "超时后滑动列表，最后再尝试一次全页慢路径）…",
@@ -917,12 +968,12 @@ class TakeoutPageBase(TakeoutShopMixin):
             return True
 
         logger.info("当前屏未见目标店，先手势翻列表（避免易触发刷新的中线滑动）…")
-        for pre_i in range(6):
+        for pre_i in range(10):
             self._swipe_merchant_list_once()
-            time.sleep(0.32)
+            time.sleep(0.20)
             if self._find_and_click_shop_on_current_screen(
                 shop_name,
-                _shop_find_budget,
+                _shop_quick_budget,
                 "已点击店铺行/店名（预滑动第 %d 次后可见），等待进入详情…",
                 pre_i + 1,
             ):
@@ -934,17 +985,17 @@ class TakeoutPageBase(TakeoutShopMixin):
 
         if self._find_and_click_shop_on_current_screen(
             shop_name,
-            _shop_find_budget,
+            _shop_quick_budget,
             "已点击店铺行/店名，等待进入详情…",
         ):
             return True
 
         for i in range(max_swipes):
             self._swipe_merchant_list_once()
-            time.sleep(0.45)
+            time.sleep(0.22)
             if self._find_and_click_shop_on_current_screen(
                 shop_name,
-                _shop_find_budget,
+                _shop_quick_budget,
                 "兜底滑动第 %d 次后已点击店铺「%s」",
                 i + 1,
                 shop_name,
