@@ -11,10 +11,10 @@ login.page.py - Appium 登录自动化脚本入口
   python login.page.py --method forget_password
   python login.page.py --method password --no-from-home   # 已在登录页，跳过首页「立即登录」
   python login.page.py --method password --phone 13800138000 --password 你的密码
-  python login.page.py --method phone --phone 19860207026
+  python login.page.py --method phone --phone 13800138000
   python login.page.py --method phone --code 123456   # 非交互：直接传入短信验证码
 
-账号密码默认来自 LoginData（环境变量 LOGIN_DEFAULT_PHONE / LOGIN_DEFAULT_PASSWORD 优先，否则为代码内占位默认值）；也可用 --phone / --password 临时覆盖。
+账号密码来自命令行参数或环境变量 LOGIN_DEFAULT_PHONE / LOGIN_DEFAULT_PASSWORD，不在代码内保存真实凭据。
 验证码登录：未传 --code 时默认在终端 input() 手动输入短信码（page_source 易含误匹配数字，已不再默认从页面自动猜码）。
 若需恢复从页面正则猜码（不推荐），可设环境变量 LOGIN_SMS_PARSE_CODE_FROM_PAGE=1。
 
@@ -37,7 +37,18 @@ from commons.logger import setup_logger
 logger = setup_logger(__name__)
 
 
-def main():
+def _missing_required_login_fields(method: str, data: LoginData) -> list[str]:
+    missing: list[str] = []
+    if method in ("phone", "password", "forget_password") and not data.resolved_phone():
+        missing.append("LOGIN_DEFAULT_PHONE/--phone")
+    if method == "password" and not data.resolved_password():
+        missing.append("LOGIN_DEFAULT_PASSWORD/--password")
+    if method == "forget_password" and not data.resolved_new_password():
+        missing.append("LOGIN_DEFAULT_NEW_PASSWORD")
+    return missing
+
+
+def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--method",
@@ -62,12 +73,12 @@ def main():
     parser.add_argument(
         "--phone",
         default=None,
-        help="登录手机号/账号（不设则用环境变量 LOGIN_DEFAULT_PHONE 或 LoginData 内置默认）",
+        help="登录手机号/账号（不设则用环境变量 LOGIN_DEFAULT_PHONE）",
     )
     parser.add_argument(
         "--password",
         default=None,
-        help="登录密码（不设则用环境变量 LOGIN_DEFAULT_PASSWORD 或 LoginData 内置默认）",
+        help="登录密码（不设则用环境变量 LOGIN_DEFAULT_PASSWORD）",
     )
     parser.add_argument(
         "--code",
@@ -85,6 +96,11 @@ def main():
     data = LoginData(**data_kw)
     if args.code:
         data.verification_code = args.code.strip()
+    missing = _missing_required_login_fields(args.method, data)
+    if missing:
+        logger.error("缺少登录参数：%s", ", ".join(missing))
+        return 2
+
     page = LoginPage(session_name=session_name, data=data)
     try:
         # 除「客服语音验证码」流外，默认从首页进入登录页
@@ -121,10 +137,10 @@ def main():
             ok = False
 
         logger.info(f"登录方法 {args.method} 执行结果: {'成功' if ok else '失败'}")
+        return 0 if ok else 1
     finally:
         DriverManager().close_driver(session_name)
 
 
 if __name__ == "__main__":
-    main()
-
+    raise SystemExit(main())

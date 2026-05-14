@@ -22,7 +22,12 @@ logger = setup_logger("pages.login")
 class LoginSmsVoiceMixin:
     # ============ 2) 手机号码登录/注册（默认验证码登录） ============
     def login_by_phone_sms(self, phone: Optional[str] = None) -> bool:
-        phone = phone or self.data.phone
+        phone = self.data.resolved_phone(phone)
+        if not phone:
+            logger.error(
+                "[ERR] 缺少短信登录手机号：请传 --phone 或设置 LOGIN_DEFAULT_PHONE"
+            )
+            return False
 
         self._phone_sms_login_active = True
         if not self._navigate_login_hub_to_phone_entry_screen():

@@ -126,8 +126,14 @@ class LoginPasswordMixin:
 
     def login_by_account_password(self, account: Optional[str] = None, password: Optional[str] = None) -> bool:
         self._phone_sms_login_active = False
-        account = account or self.data.phone
-        password = password or self.data.password
+        account = self.data.resolved_phone(account)
+        password = self.data.resolved_password(password)
+        if not account or not password:
+            logger.error(
+                "[ERR] 缺少账号或密码：请传 --phone/--password，或设置 "
+                "LOGIN_DEFAULT_PHONE / LOGIN_DEFAULT_PASSWORD"
+            )
+            return False
 
         if not self._ensure_on_account_password_login_screen():
             return False
@@ -224,6 +230,15 @@ class LoginPasswordMixin:
         4) 跳转密码修改页，输入新密码并二次确认
         5) 点击完成，校验“密码修改成功”
         """
+        phone = self.data.resolved_phone()
+        new_password = self.data.resolved_new_password()
+        if not phone or not new_password:
+            logger.error(
+                "[ERR] 忘记密码流程缺少手机号或新密码：请设置 "
+                "LOGIN_DEFAULT_PHONE / LOGIN_DEFAULT_NEW_PASSWORD，或补充 LoginData"
+            )
+            return False
+
         if not self._ensure_on_account_password_login_screen():
             logger.error("[ERR] 无法到达账号密码登录页，找不到「忘记密码」入口")
             return False
@@ -244,7 +259,7 @@ class LoginPasswordMixin:
             (AppiumBy.XPATH, '//*[@class="android.widget.EditText" and contains(@resource-id,"phone")]'),
             (AppiumBy.XPATH, '//android.widget.EditText'),
         ]
-        typed = any(self._type(by, value, self.data.phone, timeout=10) for by, value in phone_inputs)
+        typed = any(self._type(by, value, phone, timeout=10) for by, value in phone_inputs)
         if not typed:
             logger.warning("[WARN] 可能手机号已填写，无需输入")
 
@@ -306,14 +321,14 @@ class LoginPasswordMixin:
         if len(all_edittexts) >= 2:
             try:
                 all_edittexts[0].clear()
-                all_edittexts[0].send_keys(self.data.new_password)
+                all_edittexts[0].send_keys(new_password)
                 all_edittexts[1].clear()
-                all_edittexts[1].send_keys(self.data.new_password)
+                all_edittexts[1].send_keys(new_password)
             except Exception:
                 pass
         else:
-            self._type(new_pwd_inputs[0][0], new_pwd_inputs[0][1], self.data.new_password, timeout=10)
-            self._type(confirm_pwd_inputs[0][0], confirm_pwd_inputs[0][1], self.data.new_password, timeout=10)
+            self._type(new_pwd_inputs[0][0], new_pwd_inputs[0][1], new_password, timeout=10)
+            self._type(confirm_pwd_inputs[0][0], confirm_pwd_inputs[0][1], new_password, timeout=10)
 
         # 点击完成
         done_locs = [

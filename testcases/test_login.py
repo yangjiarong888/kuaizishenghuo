@@ -21,7 +21,7 @@ class TestLogin:
     def test_forget_password(self):
         """测试忘记密码功能"""
         with allure.step("1. 点击忘记密码"):
-            self.login_page.forget_password()
+            result = self.login_page.forget_password()
 
         with allure.step("2. 验证跳转到忘记密码页面"):
-            assert self.login_page.forget_password(), "忘记密码流程未返回成功"
+            assert result, "忘记密码流程未返回成功"

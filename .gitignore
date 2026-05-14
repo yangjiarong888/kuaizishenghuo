@@ -170,6 +170,10 @@ cython_debug/
 # Ruff stuff:
 .ruff_cache/
 
+# Local Appium/ADB diagnostics
+current_*.xml
+current_order.png
+
 # PyPI configuration file
 .pypirc
 

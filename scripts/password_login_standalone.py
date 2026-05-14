@@ -36,15 +36,11 @@ def main() -> int:
         action="store_true",
         help="已在登录相关页时使用，跳过首页「立即登录」",
     )
-    parser.add_argument(
-        "--phone",
-        default=None,
-        help="覆盖默认手机号（不设则用环境变量 LOGIN_DEFAULT_PHONE 或 LoginData 内置默认）",
-    )
+    parser.add_argument("--phone", default=None, help="登录手机号（不设则用 LOGIN_DEFAULT_PHONE）")
     parser.add_argument(
         "--password",
         default=None,
-        help="覆盖默认密码（不设则用环境变量 LOGIN_DEFAULT_PASSWORD 或 LoginData 内置默认）",
+        help="登录密码（不设则用 LOGIN_DEFAULT_PASSWORD）",
     )
     args = parser.parse_args()
 
@@ -54,6 +50,14 @@ def main() -> int:
     if args.password:
         data_kw["password"] = args.password
     data = LoginData(**data_kw)
+    missing = []
+    if not data.resolved_phone():
+        missing.append("LOGIN_DEFAULT_PHONE/--phone")
+    if not data.resolved_password():
+        missing.append("LOGIN_DEFAULT_PASSWORD/--password")
+    if missing:
+        logger.error("缺少登录参数：%s", ", ".join(missing))
+        return 2
 
     page = LoginPage(session_name=SESSION_NAME, data=data)
     try:
