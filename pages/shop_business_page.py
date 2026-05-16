@@ -1,6 +1,7 @@
 """商城业务流：搜索、详情、下单、客服 IM、分享。"""
 from __future__ import annotations
 
+import random
 import time
 import re
 from typing import Iterable, Optional, Sequence, Tuple
@@ -463,7 +464,12 @@ class ShopBusinessPage(ShopHomePage):
             "\u7279\u4ef7",
             "\u4fc3\u9500",
         )
-        if tap_labels(discount_labels, "\u641c\u7d22\u7ed3\u679c\u6298\u6263\u7b5b\u9009", exact=False):
+        discount_clicked = False
+        for i in range(2):
+            if tap_labels(discount_labels, f"\u641c\u7d22\u7ed3\u679c\u6298\u6263\u6392\u5e8f{i + 1}", exact=False):
+                logger.info("\u5df2\u70b9\u51fb\u6298\u6263\u6392\u5e8f %d/2\uff08\u8986\u76d6\u5347\u5e8f/\u964d\u5e8f\u5207\u6362\uff09", i + 1)
+                discount_clicked = True
+        if discount_clicked:
             logger.info("\u5df2\u547d\u4e2d\u6298\u6263/\u4f18\u60e0\u7c7b\u7b5b\u9009")
             return
         if tap_labels(("\u7b5b\u9009",), "\u641c\u7d22\u7ed3\u679c\u7b5b\u9009\u5165\u53e3", exact=False):
@@ -476,6 +482,34 @@ class ShopBusinessPage(ShopHomePage):
                 exact=False,
                 desc="\u7b5b\u9009\u9762\u677f\u786e\u8ba4",
             )
+
+    def _tap_sort_control(self, label: str, id_suffix: str, desc: str) -> bool:
+        el = self._first_displayed_by_pkg_id(id_suffix)
+        if el and self._click_element_center(el, desc):
+            return True
+        return self._click_first_text_or_desc(
+            (label,),
+            y_min_ratio=0.16,
+            y_max_ratio=0.56,
+            exact=False,
+            desc=desc,
+        )
+
+    def tap_secondary_category_filters(self) -> None:
+        """二级分类页销量/价格/折扣排序；每项点两次覆盖升降序。"""
+        for label, suffix in (
+            ("\u9500\u91cf", "ll_sort_sales"),
+            ("\u4ef7\u683c", "ll_sort_price"),
+            ("\u6298\u6263", "ll_sort_discount"),
+        ):
+            clicked_any = False
+            for i in range(2):
+                if self._tap_sort_control(label, suffix, f"\u4e8c\u7ea7\u5206\u7c7b{label}\u6392\u5e8f{i + 1}"):
+                    logger.info("\u5df2\u70b9\u51fb\u4e8c\u7ea7\u5206\u7c7b%s\u6392\u5e8f %d/2\uff08\u8986\u76d6\u5347\u5e8f/\u964d\u5e8f\uff09", label, i + 1)
+                    clicked_any = True
+                    time.sleep(0.75)
+            if not clicked_any:
+                logger.warning("\u4e8c\u7ea7\u5206\u7c7b\u672a\u627e\u5230%s\u6392\u5e8f\u63a7\u4ef6", label)
 
     def browse_special_deals_products(self) -> None:
         """Browse the special-deal section and briefly open one product when possible."""
@@ -504,6 +538,166 @@ class ShopBusinessPage(ShopHomePage):
     def browse_search_results(self) -> None:
         self.tap_search_result_filters()
         self.browse_special_deals_products()
+
+    def _visible_text_candidates_by_band(
+        self,
+        *,
+        x_min_ratio: float,
+        x_max_ratio: float,
+        y_min_ratio: float,
+        y_max_ratio: float,
+        exclude: Sequence[str] = (),
+        min_len: int = 2,
+    ):
+        w, h = self._window_size()
+        x_lo, x_hi = int(w * x_min_ratio), int(w * x_max_ratio)
+        y_lo, y_hi = int(h * y_min_ratio), int(h * y_max_ratio)
+        out = []
+        seen = set()
+        with self._mall_ctx.zero_implicit_wait():
+            try:
+                els = self.driver.find_elements(
+                    AppiumBy.XPATH,
+                    '//*[@text and string-length(@text)>0]',
+                )
+            except Exception:
+                els = []
+            for el in els:
+                try:
+                    if not el.is_displayed():
+                        continue
+                    text = self._safe_text(el)
+                    if len(text) < min_len:
+                        continue
+                    if any(part and part in text for part in exclude):
+                        continue
+                    loc, size = el.location, el.size
+                    cx = int(loc.get("x", 0) + size.get("width", 0) / 2)
+                    cy = int(loc.get("y", 0) + size.get("height", 0) / 2)
+                    if not (x_lo <= cx <= x_hi and y_lo <= cy <= y_hi):
+                        continue
+                    key = (text, cx // 12, cy // 12)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    out.append((cy, cx, text, el))
+                except Exception:
+                    continue
+        out.sort(key=lambda item: (item[0], item[1]))
+        return out
+
+    def tap_random_top_category(self) -> bool:
+        """随机点击分类页顶部横向二级分类。"""
+        if not self._page_contains_any(("\u5168\u90e8\u5206\u7c7b",)):
+            logger.warning("\u5f53\u524d\u4e0d\u50cf\u5206\u7c7b\u9875\uff0c\u8df3\u8fc7\u9876\u90e8\u4e8c\u7ea7\u5206\u7c7b\u70b9\u51fb")
+            return False
+        candidates = self._visible_text_candidates_by_band(
+            x_min_ratio=0.02,
+            x_max_ratio=0.92,
+            y_min_ratio=0.12,
+            y_max_ratio=0.32,
+            exclude=("\u641c\u7d22", "\u5168\u90e8\u5206\u7c7b", "\u9500\u91cf", "\u4ef7\u683c", "\u6298\u6263", "\u7efc\u5408"),
+        )
+        if not candidates:
+            logger.warning("\u672a\u627e\u5230\u9876\u90e8\u4e8c\u7ea7\u5206\u7c7b\u5019\u9009")
+            return False
+        _, _, text, el = random.choice(candidates)
+        ok = self._click_element_center(el, f"\u968f\u673a\u9876\u90e8\u4e8c\u7ea7\u5206\u7c7b:{text}")
+        if ok:
+            logger.info("\u5df2\u968f\u673a\u547d\u4e2d\u9876\u90e8\u4e8c\u7ea7\u5206\u7c7b\uff1a%s", text)
+        return ok
+
+    def tap_random_left_category(self) -> bool:
+        """随机点击分类页左侧分类栏。"""
+        if not self._page_contains_any(("\u5168\u90e8\u5206\u7c7b",)):
+            logger.warning("\u5f53\u524d\u4e0d\u50cf\u5206\u7c7b\u9875\uff0c\u8df3\u8fc7\u5de6\u4fa7\u5206\u7c7b\u70b9\u51fb")
+            return False
+        candidates = self._visible_text_candidates_by_band(
+            x_min_ratio=0.00,
+            x_max_ratio=0.34,
+            y_min_ratio=0.26,
+            y_max_ratio=0.84,
+            exclude=("\u7206\u6b3e\u63a8\u8350", "\u641c\u7d22", "\u5168\u90e8\u5206\u7c7b", "\u9500\u91cf", "\u4ef7\u683c", "\u6298\u6263"),
+        )
+        if not candidates:
+            logger.warning("\u672a\u627e\u5230\u5de6\u4fa7\u5206\u7c7b\u5019\u9009")
+            return False
+        _, _, text, el = random.choice(candidates)
+        ok = self._click_element_center(el, f"\u968f\u673a\u5de6\u4fa7\u5206\u7c7b:{text}")
+        if ok:
+            logger.info("\u5df2\u968f\u673a\u547d\u4e2d\u5de6\u4fa7\u5206\u7c7b\uff1a%s", text)
+        return ok
+
+    def run_random_category_flow(self) -> bool:
+        """进入分类页后随机覆盖顶部二级分类和左侧分类。"""
+        if not self._page_contains_any(("\u5168\u90e8\u5206\u7c7b",)):
+            for _ in range(3):
+                if self.ensure_mall_tab() and self._is_mall_home_main_list_visible():
+                    break
+                self.tap_top_back()
+                time.sleep(0.8)
+            if not self.ensure_mall_tab():
+                return False
+            if not self.tap_kingkong_hot_snacks():
+                logger.warning("\u672a\u901a\u8fc7\u5546\u57ce\u9996\u9875\u91d1\u521a\u533a\u8fdb\u5165\u4e8c\u7ea7\u5206\u7c7b\u9875")
+                return False
+            time.sleep(1.6)
+        self.tap_secondary_category_filters()
+        top_ok = self.tap_random_top_category()
+        time.sleep(1.0)
+        left_ok = self.tap_random_left_category()
+        time.sleep(1.0)
+        return top_ok or left_ok
+
+    def tap_random_visible_add_cart(self) -> bool:
+        """随机点击当前列表/活动页可见加购按钮。"""
+        w, h = self._window_size()
+        candidates = []
+        for suffix in ("iv_add_cart", "tv_add_cart_more", "mall_add_shop_car"):
+            for el in self._all_displayed_by_pkg_id(suffix):
+                try:
+                    loc, size = el.location, el.size
+                    cx = int(loc.get("x", 0) + size.get("width", 0) / 2)
+                    cy = int(loc.get("y", 0) + size.get("height", 0) / 2)
+                    if int(h * 0.20) <= cy <= int(h * 0.92) and 0 <= cx <= w:
+                        candidates.append((cy, cx, suffix, el))
+                except Exception:
+                    continue
+        if not candidates:
+            logger.warning("\u6d3b\u52a8/\u5217\u8868\u9875\u672a\u627e\u5230\u53ef\u89c1\u52a0\u8d2d\u6309\u94ae")
+            return False
+        _, _, suffix, el = random.choice(candidates)
+        if not self._click_element_center(el, f"\u968f\u673a\u52a0\u8d2d({suffix})"):
+            return False
+        self.handle_add_cart_followups()
+        logger.info("\u5df2\u5728\u6d3b\u52a8/\u5217\u8868\u9875\u968f\u673a\u52a0\u8d2d")
+        return True
+
+    def run_activity_random_add_cart_to_cart(self) -> bool:
+        """进入活动页后随机加购商品，并跳转购物车。"""
+        if not self._page_contains_any(("\u9650\u65f6\u7279\u4ef7", "\u6298\u6263", "\u4f18\u60e0", "\u7279\u4ef7")):
+            if not self.ensure_mall_tab():
+                return False
+        self._click_first_text_or_desc(
+            ("\u9650\u65f6\u7279\u4ef7", "\u6298\u6263", "\u4f18\u60e0", "\u7279\u4ef7", "\u4fc3\u9500"),
+            y_min_ratio=0.12,
+            y_max_ratio=0.72,
+            exact=False,
+            desc="\u6d3b\u52a8\u5165\u53e3",
+        )
+        time.sleep(1.5)
+        add_ok = self.tap_random_visible_add_cart()
+        cart_ok = self.tap_floating_or_entry_cart()
+        if cart_ok:
+            logger.info("\u5df2\u4ece\u6d3b\u52a8\u9875\u8df3\u8f6c\u8d2d\u7269\u8f66")
+        return add_ok and cart_ok
+
+    def run_category_and_activity_explore(self) -> bool:
+        category_ok = self.run_random_category_flow()
+        self.tap_top_back()
+        time.sleep(1.0)
+        activity_ok = self.run_activity_random_add_cart_to_cart()
+        return category_ok and activity_ok
 
     def search_goods(self, keyword: str) -> bool:
         """进入搜索页并搜索商品关键字。"""

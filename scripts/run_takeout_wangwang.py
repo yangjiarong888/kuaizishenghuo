@@ -16,6 +16,8 @@
   python scripts/run_takeout_wangwang.py --checkout --delivery-time-slot-ordinal 5
   python scripts/run_takeout_wangwang.py --checkout --delivery-slot-contains 01:40
   python scripts/run_takeout_wangwang.py --checkout --checkout-payment cod
+  python scripts/run_takeout_wangwang.py --checkout --coupon-policy require
+  python scripts/run_takeout_wangwang.py --checkout --pickup-code on --notify-method phone
 
 默认 **不杀进程**（START_MODE=activate）：新建 Appium 会话后只 activate_app，再由脚本里
 ``ensure_takeout_tab()`` 从当前界面（首页/我的/消息等）**点击底栏「外卖」** 进列表。
@@ -41,6 +43,11 @@ if str(ROOT) not in sys.path:
 
 from commons.driver import DriverManager
 from commons.logger import setup_logger
+from pages.takeout_checkout_mixin import (
+    DEFAULT_MERCHANT_REMARK,
+    DEFAULT_REMARK_TEXT,
+    DEFAULT_RIDER_REMARK,
+)
 from pages.takeout_page import TakeoutPageBase, open_wangwang_supermarket_from_takeout_home
 
 logger = setup_logger(__name__)
@@ -110,6 +117,39 @@ def main() -> int:
         help="结账支付方式：balance 余额（默认）；cod 货到付款（不输入支付密码）。",
     )
     parser.add_argument(
+        "--coupon-policy",
+        choices=("auto", "skip", "require"),
+        default="auto",
+        help="外卖优惠券策略：auto 平台券/商家券有可用就选；skip 跳过；require 至少选中一类",
+    )
+    parser.add_argument(
+        "--pickup-code",
+        choices=("keep", "on", "off"),
+        default="keep",
+        help="取件码开关：keep 保持当前；on 开启；off 关闭",
+    )
+    parser.add_argument(
+        "--notify-method",
+        choices=("keep", "app", "phone"),
+        default="keep",
+        help="通知方式：keep 保持当前；app 选择 APP 联系；phone 选择电话联系",
+    )
+    parser.add_argument(
+        "--remark-text",
+        default=DEFAULT_REMARK_TEXT,
+        help="备注自由输入文案；默认 test order，传空字符串可只选快捷备注",
+    )
+    parser.add_argument(
+        "--rider-remark",
+        default=DEFAULT_RIDER_REMARK,
+        help="对骑手快捷备注；传空字符串可跳过",
+    )
+    parser.add_argument(
+        "--merchant-remark",
+        default=DEFAULT_MERCHANT_REMARK,
+        help="对商家快捷备注；传空字符串可跳过",
+    )
+    parser.add_argument(
         "--cold",
         action="store_true",
         help="冷启动：杀进程并 start_activity（原 commons/driver 默认行为；与本脚本默认相反）",
@@ -162,6 +202,12 @@ def main() -> int:
             delivery_time_slot_ordinal=args.delivery_time_slot_ordinal,
             delivery_slot_contains=args.delivery_slot_contains,
             checkout_payment=args.checkout_payment,
+            coupon_policy=args.coupon_policy,
+            pickup_code=args.pickup_code,
+            notify_method=args.notify_method,
+            remark_text=args.remark_text,
+            rider_remark=args.rider_remark,
+            merchant_remark=args.merchant_remark,
         )
     if ok:
         logger.info(

@@ -1,6 +1,7 @@
 """店铺详情下单流程（TakeoutPageBase 混入）。"""
 from __future__ import annotations
 
+import html
 import random
 import re
 import time
@@ -28,6 +29,10 @@ from pages.takeout_locators import (
 )
 
 logger = setup_logger(__name__)
+
+DEFAULT_RIDER_REMARK = "请把餐品放到大楼前台 Please place the meal at the reception desk"
+DEFAULT_MERCHANT_REMARK = "如缺货，直接取消订单 Any product no stock, cancel order"
+DEFAULT_REMARK_TEXT = "test order"
 
 
 
@@ -2054,6 +2059,439 @@ class TakeoutCheckoutMixin(TakeoutDeliveryTimeMixin, TakeoutCancelOrderMixin):
         return False
     
 
+    def _checkout_page_texts(self) -> List[str]:
+        try:
+            src = self.driver.page_source or ""
+        except Exception:
+            src = ""
+        texts: List[str] = []
+        for m in re.finditer(r'(?:text|content-desc)="([^"]*)"', src):
+            tx = html.unescape(m.group(1)).strip()
+            if tx and tx.lower() != "null":
+                texts.append(tx)
+        return texts
+
+    def _checkout_page_has_any(self, labels: Sequence[str]) -> bool:
+        blob = "\n".join(self._checkout_page_texts())
+        return any(label in blob for label in labels)
+
+    def _checkout_coupon_count(self, label: str) -> Optional[int]:
+        for tx in self._checkout_page_texts():
+            if label not in tx:
+                continue
+            m = re.search(r"(\d+)\s*张\s*可用", tx)
+            if m:
+                return int(m.group(1))
+            if "无可用" in tx or "暂无可用" in tx or "0张可用" in tx:
+                return 0
+            if "可用" in tx:
+                return None
+        return None
+
+    def _tap_checkout_coupon_row(self, label: str) -> bool:
+        w, h = self._window_size_safe()
+        for xp in (
+            f'//*[contains(@content-desc,"{label}")]',
+            f'//*[contains(@text,"{label}")]',
+        ):
+            try:
+                for el in self.driver.find_elements(AppiumBy.XPATH, xp):
+                    try:
+                        if not el.is_displayed():
+                            continue
+                        y = int(el.location.get("y", 0))
+                        if y < int(h * 0.14) or y > int(h * 0.88):
+                            continue
+                        if self._coord_tap_or_click(el, f"已点击{label}入口"):
+                            return True
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+        x, y = int(w * 0.80), int(h * 0.66)
+        try:
+            self.driver.execute_script("mobile: clickGesture", {"x": x, "y": y})
+            logger.info("%s 入口坐标兜底 (%d,%d)", label, x, y)
+            time.sleep(0.55)
+            return True
+        except Exception:
+            return False
+
+    def _wait_checkout_coupon_sheet(self, timeout: float = 5.0) -> bool:
+        end = time.time() + timeout
+        markers = ("选择优惠券", "可用优惠券", "不使用优惠券", "立即使用")
+        while time.time() < end:
+            if self._checkout_page_has_any(markers):
+                return True
+            time.sleep(0.35)
+        return False
+
+    def _pick_first_available_checkout_coupon(self, label: str) -> bool:
+        _, h = self._window_size_safe()
+        banned = ("不使用", "暂无", "不可用", "已失效", "已过期")
+        xpaths = (
+            '//*[contains(@content-desc,"₱") or contains(@text,"₱")]',
+            '//*[contains(@content-desc,"减") or contains(@text,"减")]',
+            '//*[contains(@content-desc,"满") or contains(@text,"满")]',
+            '//*[contains(@content-desc,"折") or contains(@text,"折")]',
+            '//*[contains(@content-desc,"使用") or contains(@text,"使用")]',
+        )
+        for xp in xpaths:
+            try:
+                elements = self.driver.find_elements(AppiumBy.XPATH, xp)
+            except Exception:
+                elements = []
+            for el in elements:
+                try:
+                    if not el.is_displayed():
+                        continue
+                    blob = self._element_merchant_blob(el)
+                    if any(word in blob for word in banned):
+                        continue
+                    y = int(el.location.get("y", 0))
+                    if y < int(h * 0.15) or y > int(h * 0.88):
+                        continue
+                    if self._coord_tap_or_click(el, f"已选择{label}候选券"):
+                        return True
+                except Exception:
+                    continue
+        try:
+            w, h = self._window_size_safe()
+            self.driver.execute_script(
+                "mobile: clickGesture", {"x": int(w * 0.50), "y": int(h * 0.32)}
+            )
+            logger.info("%s 首张券坐标兜底", label)
+            time.sleep(0.55)
+            return True
+        except Exception:
+            return False
+
+    def _confirm_checkout_coupon_sheet(self, label: str) -> None:
+        for sub in ("确定", "完成", "确认", "使用", "立即使用"):
+            if self._tap_first_displayed(
+                AppiumBy.XPATH,
+                f'//*[contains(@content-desc,"{sub}") or contains(@text,"{sub}")]',
+            ):
+                logger.info("已确认%s选择：%s", label, sub)
+                time.sleep(0.8)
+                return
+
+    def _scroll_checkout_for_coupon_rows_once(self) -> None:
+        try:
+            w, h = self._window_size_safe()
+            self.driver.swipe(int(w * 0.50), int(h * 0.76), int(w * 0.50), int(h * 0.38), 420)
+            time.sleep(0.45)
+        except Exception:
+            pass
+
+    def shop_apply_checkout_coupons(self, coupon_policy: str = "auto") -> bool:
+        """
+        外卖结算页有两类券：平台优惠券、商家优惠券。商城下单脚本只处理平台券。
+        policy: auto=有可用就选；skip=不处理；require=至少选中一类可用券。
+        """
+        policy = (coupon_policy or "auto").strip().lower()
+        if policy in ("skip", "none", "off"):
+            logger.info("已按参数跳过外卖优惠券选择")
+            return True
+        labels = ("平台优惠券", "商家优惠券")
+        selected_any = False
+        saw_available = False
+        for label in labels:
+            count = self._checkout_coupon_count(label)
+            if count is None and not self._checkout_page_has_any((label,)):
+                for _ in range(2):
+                    self._scroll_checkout_for_coupon_rows_once()
+                    count = self._checkout_coupon_count(label)
+                    if count is not None or self._checkout_page_has_any((label,)):
+                        break
+            if count == 0:
+                logger.info("外卖%s 0 张可用，跳过", label)
+                continue
+            if count is None and not self._checkout_page_has_any((label,)):
+                logger.info("外卖结算页未找到%s入口", label)
+                continue
+            saw_available = True
+            if count is None:
+                logger.info("外卖%s可用张数未明确，尝试打开选择", label)
+            else:
+                logger.info("外卖%s可用张数：%s", label, count)
+            if not self._tap_checkout_coupon_row(label):
+                if policy == "require":
+                    logger.error("要求选择优惠券，但未点到%s入口", label)
+                    return False
+                continue
+            if not self._wait_checkout_coupon_sheet(timeout=5.0):
+                logger.warning("点击%s后未识别优惠券弹层", label)
+                continue
+            if not self._pick_first_available_checkout_coupon(label):
+                if policy == "require":
+                    logger.error("要求选择优惠券，但%s弹层未找到可用券", label)
+                    return False
+                continue
+            self._confirm_checkout_coupon_sheet(label)
+            selected_any = True
+        if policy == "require" and not selected_any:
+            logger.error(
+                "要求使用优惠券，但未成功选择平台/商家优惠券（saw_available=%s）",
+                saw_available,
+            )
+            return False
+        logger.info("外卖优惠券处理完成：selected_any=%s", selected_any)
+        return True
+
+    def _scroll_checkout_for_preferences_once(self, *, down: bool = True) -> None:
+        try:
+            w, h = self._window_size_safe()
+            if down:
+                self.driver.swipe(int(w * 0.50), int(h * 0.76), int(w * 0.50), int(h * 0.36), 420)
+            else:
+                self.driver.swipe(int(w * 0.50), int(h * 0.36), int(w * 0.50), int(h * 0.76), 420)
+            time.sleep(0.45)
+        except Exception:
+            pass
+
+    def _checkout_find_anchor(self, labels: Sequence[str], *, y_min_ratio: float = 0.0, y_max_ratio: float = 1.0):
+        w, h = self._window_size_safe()
+        del w
+        y_min, y_max = int(h * y_min_ratio), int(h * y_max_ratio)
+        for raw in labels:
+            label = (raw or "").replace('"', "").replace("'", "")[:48]
+            if not label:
+                continue
+            xp = f'//*[contains(@content-desc,"{label}") or contains(@text,"{label}")]'
+            try:
+                elements = self.driver.find_elements(AppiumBy.XPATH, xp)
+            except Exception:
+                elements = []
+            for el in elements:
+                try:
+                    if not el.is_displayed():
+                        continue
+                    y = int(el.location.get("y", 0))
+                    if y_min <= y <= y_max:
+                        return el
+                except Exception:
+                    continue
+        return None
+
+    def _checkout_anchor_y_ratio(self, labels: Sequence[str], default: float = 0.55) -> float:
+        el = self._checkout_find_anchor(labels, y_min_ratio=0.06, y_max_ratio=0.94)
+        if not el:
+            return default
+        try:
+            loc = el.location
+            size = el.size
+            _, h = self._window_size_safe()
+            return (int(loc.get("y", 0)) + int(size.get("height", 0)) // 2) / max(h, 1)
+        except Exception:
+            return default
+
+    def _checkout_scroll_until_visible(self, labels: Sequence[str], *, max_rounds: int = 6) -> bool:
+        for idx in range(max_rounds):
+            if self._checkout_find_anchor(labels, y_min_ratio=0.08, y_max_ratio=0.92):
+                return True
+            self._scroll_checkout_for_preferences_once(down=True)
+            logger.debug("外卖提交页查找%s：%d/%d", "/".join(labels), idx + 1, max_rounds)
+        return self._checkout_find_anchor(labels, y_min_ratio=0.08, y_max_ratio=0.92) is not None
+
+    def shop_set_pickup_code(self, pickup_code: str = "keep") -> bool:
+        policy = (pickup_code or "keep").strip().lower()
+        if policy in ("keep", "skip", "none"):
+            logger.info("外卖取件码保持当前状态")
+            return True
+        if policy not in ("on", "off"):
+            logger.warning("不支持的外卖取件码策略：%s", pickup_code)
+            return True
+        if not self._checkout_scroll_until_visible(("取件码",), max_rounds=5):
+            logger.warning("外卖提交页未找到取件码区域，跳过")
+            return True
+        target = "开启" if policy == "on" else "关闭"
+        row_y = self._checkout_anchor_y_ratio(("取件码",), default=0.55)
+        if self._tap_first_displayed(
+            AppiumBy.XPATH,
+            f'//*[contains(@content-desc,"{target}") or contains(@text,"{target}")]',
+        ):
+            logger.info("外卖取件码已切换为：%s", target)
+            time.sleep(0.6)
+            return True
+        w, h = self._window_size_safe()
+        x_ratio = 0.88 if policy == "on" else 0.70
+        try:
+            self.driver.execute_script(
+                "mobile: clickGesture", {"x": int(w * x_ratio), "y": int(h * row_y)}
+            )
+            logger.info("外卖取件码%s坐标兜底", target)
+            time.sleep(0.6)
+        except Exception:
+            pass
+        return True
+
+    def shop_set_notify_method(self, notify_method: str = "keep") -> bool:
+        method = (notify_method or "keep").strip().lower()
+        if method in ("keep", "skip", "none"):
+            logger.info("外卖通知方式保持当前状态")
+            return True
+        if method not in ("app", "phone"):
+            logger.warning("不支持的外卖通知方式：%s", notify_method)
+            return True
+        if not self._checkout_scroll_until_visible(("通知方式",), max_rounds=7):
+            logger.warning("外卖提交页未找到通知方式区域，跳过")
+            return True
+        labels = ("APP联系", "APP联络", "APP通知", "APP") if method == "app" else (
+            "电话联系",
+            "电话",
+            "手机联系",
+        )
+        row_y = self._checkout_anchor_y_ratio(("通知方式",), default=0.78)
+        for label in labels:
+            if self._tap_first_displayed(
+                AppiumBy.XPATH,
+                f'//*[contains(@content-desc,"{label}") or contains(@text,"{label}")]',
+            ):
+                logger.info("外卖通知方式已切换为：%s", method)
+                time.sleep(0.6)
+                return True
+        w, h = self._window_size_safe()
+        x_ratio = 0.56 if method == "app" else 0.84
+        try:
+            self.driver.execute_script(
+                "mobile: clickGesture", {"x": int(w * x_ratio), "y": int(h * row_y)}
+            )
+            logger.info("外卖通知方式%s坐标兜底", method)
+            time.sleep(0.6)
+        except Exception:
+            pass
+        return True
+
+    def _visible_edit_texts_checkout(self) -> List[Any]:
+        try:
+            elements = self.driver.find_elements(AppiumBy.CLASS_NAME, "android.widget.EditText")
+        except Exception:
+            elements = []
+        out: List[Tuple[int, Any]] = []
+        for el in elements:
+            try:
+                if el.is_displayed():
+                    out.append((int(el.location.get("y", 0)), el))
+            except Exception:
+                continue
+        out.sort(key=lambda item: item[0])
+        return [el for _, el in out]
+
+    def _type_checkout_text(self, text: str, desc: str) -> bool:
+        for el in self._visible_edit_texts_checkout():
+            try:
+                el.click()
+                time.sleep(0.15)
+                try:
+                    el.clear()
+                except Exception:
+                    pass
+                el.send_keys(text)
+                logger.info("已输入%s：%s", desc, text)
+                return True
+            except Exception:
+                continue
+        return False
+
+    def _select_checkout_quick_note(self, label: str, desc: str, *, max_scrolls: int = 5) -> bool:
+        if not label:
+            return True
+        short = label.split(" Please ")[0].split(" Any ")[0].strip()
+        labels = tuple(dict.fromkeys((label, short)))
+        for attempt in range(max_scrolls + 1):
+            for raw in labels:
+                safe = raw.replace('"', "").replace("'", "")[:48]
+                if not safe:
+                    continue
+                xp = f'//*[contains(@content-desc,"{safe}") or contains(@text,"{safe}")]'
+                try:
+                    for el in self.driver.find_elements(AppiumBy.XPATH, xp):
+                        try:
+                            if el.is_displayed() and self._coord_tap_or_click(el, f"已选择{desc}"):
+                                return True
+                        except Exception:
+                            continue
+                except Exception:
+                    pass
+            if attempt < max_scrolls:
+                self._scroll_checkout_for_preferences_once(down=True)
+        logger.warning("未选中%s：%s", desc, label)
+        return False
+
+    def shop_fill_remark(
+        self,
+        remark_text: Optional[str] = DEFAULT_REMARK_TEXT,
+        rider_remark: Optional[str] = DEFAULT_RIDER_REMARK,
+        merchant_remark: Optional[str] = DEFAULT_MERCHANT_REMARK,
+    ) -> bool:
+        remark = (remark_text if remark_text is not None else DEFAULT_REMARK_TEXT).strip()
+        rider = (rider_remark or "").strip()
+        merchant = (merchant_remark or "").strip()
+        if not (remark or rider or merchant):
+            logger.info("外卖备注为空且无快捷备注，跳过")
+            return True
+        if not self._checkout_scroll_until_visible(("备注信息", "备注", "留言"), max_rounds=8):
+            logger.warning("外卖提交页未找到备注入口，跳过")
+            return True
+        if not self._tap_first_displayed(
+            AppiumBy.XPATH,
+            '//*[contains(@content-desc,"备注信息") or contains(@text,"备注信息") '
+            'or contains(@content-desc,"备注") or contains(@text,"备注") '
+            'or contains(@content-desc,"留言") or contains(@text,"留言")]',
+        ):
+            row_y = self._checkout_anchor_y_ratio(("备注信息", "备注", "留言"), default=0.84)
+            try:
+                w, h = self._window_size_safe()
+                self.driver.execute_script(
+                    "mobile: clickGesture", {"x": int(w * 0.72), "y": int(h * row_y)}
+                )
+                time.sleep(0.7)
+            except Exception:
+                pass
+        if not self._checkout_page_has_any(("添加备注", "对骑手备注", "对商家备注", "完成")):
+            time.sleep(1.0)
+        if remark:
+            self._type_checkout_text(remark, "外卖备注文本")
+        self._select_checkout_quick_note(rider, "外卖对骑手快捷备注", max_scrolls=3)
+        self._select_checkout_quick_note(merchant, "外卖对商家快捷备注", max_scrolls=5)
+        try:
+            self.driver.hide_keyboard()
+        except Exception:
+            pass
+        if not self._tap_first_displayed(
+            AppiumBy.XPATH,
+            '//*[contains(@content-desc,"完成") or contains(@text,"完成") '
+            'or contains(@content-desc,"保存") or contains(@text,"保存") '
+            'or contains(@content-desc,"确定") or contains(@text,"确定")]',
+        ):
+            try:
+                self.driver.back()
+            except Exception:
+                pass
+        time.sleep(0.8)
+        logger.info("外卖备注处理完成：remark=%s rider=%s merchant=%s", remark, rider, merchant)
+        return True
+
+    def shop_apply_checkout_preferences(
+        self,
+        *,
+        pickup_code: str = "keep",
+        notify_method: str = "keep",
+        remark_text: Optional[str] = DEFAULT_REMARK_TEXT,
+        rider_remark: Optional[str] = DEFAULT_RIDER_REMARK,
+        merchant_remark: Optional[str] = DEFAULT_MERCHANT_REMARK,
+    ) -> bool:
+        self.shop_set_pickup_code(pickup_code)
+        self.shop_set_notify_method(notify_method)
+        self.shop_fill_remark(
+            remark_text=remark_text,
+            rider_remark=rider_remark,
+            merchant_remark=merchant_remark,
+        )
+        return True
+
+
     def _address_sheet_label_skippable(self, blob: str, *, short_max: int = 28) -> bool:
         """短条多为标题/按钮；长条多为具体地址，不因含个别词整行丢弃。"""
         s = (blob or "").strip()
@@ -2311,10 +2749,19 @@ class TakeoutCheckoutMixin(TakeoutDeliveryTimeMixin, TakeoutCancelOrderMixin):
         delivery_slot_contains: Optional[str] = None,
         delivery_time_slot_ordinal: Optional[int] = None,
         checkout_payment: str = "balance",
+        coupon_policy: str = "auto",
+        pickup_code: str = "keep",
+        notify_method: str = "keep",
+        remark_text: Optional[str] = DEFAULT_REMARK_TEXT,
+        rider_remark: Optional[str] = DEFAULT_RIDER_REMARK,
+        merchant_remark: Optional[str] = DEFAULT_MERCHANT_REMARK,
     ) -> bool:
         """
         ``checkout_payment``：``balance``（默认）选余额并输支付密码；
         ``cod`` / 传 ``\"货到付款\"`` 选货到付款并跳过 ``shop_enter_pay_password``。
+        ``coupon_policy``：外卖同时处理平台优惠券、商家优惠券；``auto`` 有可用就选，
+        ``skip`` 跳过，``require`` 要求至少选中一类。
+        备注默认会选择骑手/商家快捷备注，并输入 ``test order``。
         """
         logger.info("店铺详情：开始下单支付并取消流程…")
         cat = (category or "").strip() or "店内招牌"
@@ -2356,6 +2803,16 @@ class TakeoutCheckoutMixin(TakeoutDeliveryTimeMixin, TakeoutCancelOrderMixin):
             ok_addr = self.shop_pick_random_address_in_sheet()
         if not ok_addr:
             logger.warning("地址选择可能失败，继续尝试支付方式")
+        if not self.shop_apply_checkout_coupons(coupon_policy=coupon_policy):
+            logger.error("优惠券处理失败，终止支付流程")
+            return False
+        self.shop_apply_checkout_preferences(
+            pickup_code=pickup_code,
+            notify_method=notify_method,
+            remark_text=remark_text,
+            rider_remark=rider_remark,
+            merchant_remark=merchant_remark,
+        )
         raw = (checkout_payment or "balance").strip()
         low = raw.lower()
         if low in ("cod", "cash_on_delivery") or raw in (

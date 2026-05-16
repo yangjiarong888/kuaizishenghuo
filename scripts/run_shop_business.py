@@ -36,7 +36,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="商城业务：搜索/详情/下单/IM/分享")
     parser.add_argument(
         "--action",
-        choices=("search", "detail", "order", "im", "share", "full"),
+        choices=("search", "detail", "order", "im", "share", "category", "activity", "explore", "full"),
         default="full",
         help="要执行的商城业务动作",
     )
@@ -95,6 +95,12 @@ def main() -> int:
             ok = page.open_goods_detail(args.keyword) and page.tap_share_on_detail(
                 share_target
             )
+        elif args.action == "category":
+            ok = page.run_random_category_flow()
+        elif args.action == "activity":
+            ok = page.run_activity_random_add_cart_to_cart()
+        elif args.action == "explore":
+            ok = page.run_category_and_activity_explore()
         elif args.action == "im":
             ok = page.open_goods_detail(args.keyword) and page.send_detail_im_message(
                 args.message

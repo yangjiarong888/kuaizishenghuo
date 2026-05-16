@@ -85,7 +85,7 @@ def main() -> int:
 
     logger.info("获取驱动 session=%s …", args.session)
     driver = DriverManager().get_driver(session_name=args.session)
-    skip = set(args.skip_phases) if args.skip_phases else None
+    skip = set(args.skip_phase) if args.skip_phase else None
     if skip:
         unknown = skip - set(SHOP_HOME_FLOW_PHASE_IDS)
         if unknown:
