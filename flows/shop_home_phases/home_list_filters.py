@@ -15,6 +15,4 @@ def run(page: ShopHomeFlowPage) -> bool:
     logger.info(
         "限时特价/新品优选已在上一段完成 Tab 与列表浏览；跳过首页 iv_add_cart（避免与详情加购重复）"
     )
-    if not page.ensure_mall_tab():
-        page.ensure_mall_tab()
     return True

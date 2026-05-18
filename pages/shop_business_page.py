@@ -26,11 +26,13 @@ from pages.shop_locators import (
     SHOP_ID_MALL_KEFU,
     SHOP_ID_RV_CONTENT,
     SHOP_ID_RV_GOODS,
+    SHOP_ID_MALL_CATEGORY_GOODS_NAME,
     SHOP_ID_TV_GOODS_NAME,
     SHOP_ID_TV_PRICE,
     SHOP_IM_INPUT_ID_SUFFIXES,
     SHOP_SEARCH_ID_SUFFIXES,
     SHOP_SHARE_ID_SUFFIXES,
+    SHOP_TEXT_DAILY_BAIHUO,
 )
 
 logger = setup_logger(__name__)
@@ -837,6 +839,8 @@ class ShopBusinessPage(ShopHomePage):
         """从当前列表/搜索结果页打开第一个商品详情。"""
         if self._is_mall_product_detail_visible():
             return True
+        if self._tap_first_category_goods_item():
+            return True
         if self._tap_first_search_grid_goods_by_source_bounds():
             return True
         if self.tap_first_mall_list_product_into_detail():
@@ -861,6 +865,69 @@ class ShopBusinessPage(ShopHomePage):
             return self._is_mall_product_detail_visible()
         except Exception:
             return False
+
+    def _category_goods_item_price(self, item) -> Optional[float]:
+        try:
+            texts = item.find_elements(AppiumBy.CLASS_NAME, "android.widget.TextView")
+        except Exception:
+            return None
+        vals = []
+        for el in texts:
+            try:
+                if not el.is_displayed():
+                    continue
+                val = parse_price_text(el.text or "")
+                if val is not None:
+                    vals.append(val)
+            except Exception:
+                continue
+        return max(vals) if vals else None
+
+    def _tap_category_goods_item(self, item, *, desc: str) -> bool:
+        try:
+            loc = item.location
+            size = item.size
+            x = int(loc["x"] + size["width"] * 0.35)
+            y = int(loc["y"] + size["height"] * 0.42)
+            self.driver.execute_script("mobile: clickGesture", {"x": x, "y": y})
+            logger.info("已点击分类商品行进入详情：%s (%d,%d)", desc, x, y)
+            time.sleep(1.8)
+            return self._is_mall_product_detail_visible()
+        except Exception:
+            return False
+
+    def _tap_first_category_goods_item(self, *, min_price: Optional[float] = None) -> bool:
+        with self._mall_ctx.zero_implicit_wait():
+            for _ in range(8):
+                try:
+                    items = self.driver.find_elements(
+                        AppiumBy.XPATH, '//*[contains(@resource-id,"goodsListItemLayout")]'
+                    )
+                except Exception:
+                    items = []
+                for item in items:
+                    try:
+                        if not item.is_displayed():
+                            continue
+                        price = self._category_goods_item_price(item)
+                        if min_price is not None and (price is None or price < min_price):
+                            continue
+                        name = ""
+                        try:
+                            name = self.mall_category_goods_name_text(item)
+                        except Exception:
+                            pass
+                        if self._tap_category_goods_item(
+                            item,
+                            desc=f"{name or '?'} price={price}",
+                        ):
+                            return True
+                    except Exception:
+                        continue
+                self._swipe_mall_vertical_list_down(
+                    1, 0.8, "日用百货分类找可下单商品", x_ratio=0.58
+                )
+        return False
 
     def open_goods_detail(self, keyword: Optional[str] = None) -> bool:
         """可选搜索关键字后打开商品详情；无关键字则从商城首页主列表打开。"""
@@ -1205,6 +1272,28 @@ class ShopBusinessPage(ShopHomePage):
             return False
         return self.submit_order_if_requested(submit_order)
 
+    def run_daily_baihuo_order_flow(
+        self,
+        *,
+        submit_order: bool = False,
+        min_price: float = 400.0,
+    ) -> bool:
+        """固定路径：商城首页 -> 全部分类 -> 日用百货 -> 分类商品 -> 立即购买。"""
+        if not self.ensure_mall_tab():
+            return False
+        if not self.tap_mall_kingkong_daily_baihuo_via_popup():
+            logger.error("未能进入「%s」分类", SHOP_TEXT_DAILY_BAIHUO)
+            return False
+        time.sleep(1.0)
+        if not self._tap_first_category_goods_item(min_price=min_price):
+            logger.warning("日用百货未找到价格 >= %.2f 的可见商品，改点首个可见商品", min_price)
+            if not self._tap_first_category_goods_item(min_price=None):
+                logger.error("日用百货分类未能打开商品详情")
+                return False
+        if not self.buy_now_to_checkout():
+            return False
+        return self.submit_order_if_requested(submit_order)
+
     def run_full_business_flow(
         self,
         *,
@@ -1232,3 +1321,13 @@ class ShopBusinessPage(ShopHomePage):
 def run_shop_business_from_driver(driver: WebDriver, **kwargs) -> bool:
     """供脚本直接调用。"""
     return ShopBusinessPage(driver).run_full_business_flow(**kwargs)
+
+
+def parse_price_text(raw: str) -> Optional[float]:
+    text = (raw or "").replace(",", "").strip()
+    m = re.search(r"(?:₱|P|￥|¥)?\s*(\d+(?:\.\d{1,2})?)", text, flags=re.I)
+    if not m:
+        return None
+    if not any(mark in text for mark in ("₱", "P", "￥", "¥", "元")) and "." not in m.group(1):
+        return None
+    return float(m.group(1))

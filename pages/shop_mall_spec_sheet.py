@@ -1,9 +1,8 @@
 """商城多规格底部弹层：选 SKU、数量、确定/完成。"""
 from __future__ import annotations
 
-import re
 import time
-from typing import Callable
+from typing import Callable, List, Optional, Tuple
 
 from appium.webdriver.common.appiumby import AppiumBy
 
@@ -34,6 +33,53 @@ class MallSpecSheet:
         self._ctx = ctx
         self._login_like_visible = login_like_visible
 
+    SPEC_GROUP_TITLES = (
+        "规格",
+        "颜色",
+        "色号",
+        "尺寸",
+        "尺码",
+        "容量",
+        "口味",
+        "味道",
+        "款式",
+        "型号",
+        "净含量",
+        "包装",
+        "套餐",
+        "属性",
+        "类型",
+    )
+    NON_SPEC_EXACT = (
+        "确定",
+        SHOP_TEXT_FINISH_SPEC,
+        "取消",
+        "加入购物车",
+        "立即购买",
+        "数量",
+        "库存",
+        "选择",
+        "已选",
+        "+",
+        "-",
+        "＋",
+        "－",
+    )
+    NON_SPEC_CONTAINS = (
+        "优惠",
+        "活动",
+        "服务",
+        "正品",
+        "退换",
+        "维修",
+        "客服",
+        "收藏",
+        "购物车",
+        "查看更多",
+        "暂无优惠",
+        "未选择",
+    )
+
     def tx_looks_like_mall_spec_chip(self, tx: str) -> bool:
         if not tx or len(tx) > 44:
             return False
@@ -56,17 +102,170 @@ class MallSpecSheet:
         )
         if t in ban_exact:
             return False
-        if re.fullmatch(r"\d{1,4}", t):
+        if self._fullmatch(r"\d{1,4}", t):
             return False
         low = t.lower()
         return bool(
-            re.search(
+            self._search(
                 r"(pcs|pic|pc\b|box|箱|盒|袋|包|瓶|罐|条|/"
-                r"|ml\b|\bmg\b|\bg\b|\d+\s*(瓶|罐|包|pcs|pic|箱|件|盒|条))",
+                r"|ml\b|\bmg\b|\bg\b|cm\b|mm\b|m\b|寸|码|号|色|款|"
+                r"\d+\s*(瓶|罐|包|pcs|pic|箱|件|盒|条|cm|mm|m|寸|码|号))",
                 low,
-                re.I,
             )
         )
+
+    @staticmethod
+    def _search(pattern: str, text: str) -> bool:
+        import re
+
+        return re.search(pattern, text, re.I) is not None
+
+    @staticmethod
+    def _fullmatch(pattern: str, text: str) -> bool:
+        import re
+
+        return re.fullmatch(pattern, text) is not None
+
+    def _sheet_root(self):
+        for suffix in (
+            SHOP_ID_DIALOG_CHOOSE_CONTAINER,
+            SHOP_ID_BOTTOM_POPUP,
+            SHOP_ID_CHOOSE_SCROLL,
+            SHOP_ID_CHOOSE_RECYCLER,
+            SHOP_ID_CHOOSE_SKU_CONTAINER,
+        ):
+            root = self._ctx.first_displayed_by_pkg_id(suffix)
+            if root:
+                return root
+        return None
+
+    @staticmethod
+    def _bounds(el) -> Optional[Tuple[int, int, int, int]]:
+        try:
+            loc = el.location
+            size = el.size
+            x1 = int(loc["x"])
+            y1 = int(loc["y"])
+            return x1, y1, x1 + int(size["width"]), y1 + int(size["height"])
+        except Exception:
+            return None
+
+    def _visible_textviews(self, root) -> List[Tuple[int, int, int, int, str, object]]:
+        if not root:
+            return []
+        out: List[Tuple[int, int, int, int, str, object]] = []
+        try:
+            elements = root.find_elements(AppiumBy.CLASS_NAME, "android.widget.TextView")
+        except Exception:
+            return out
+        for el in elements:
+            try:
+                if not el.is_displayed():
+                    continue
+                text = (el.text or "").strip()
+                if not text:
+                    continue
+                bounds = self._bounds(el)
+                if not bounds:
+                    continue
+                x1, y1, x2, y2 = bounds
+                out.append((y1, x1, x2, y2, text, el))
+            except Exception:
+                continue
+        out.sort(key=lambda item: (item[0], item[1]))
+        return out
+
+    def _is_spec_group_title(self, text: str) -> bool:
+        t = (text or "").strip()
+        return t in self.SPEC_GROUP_TITLES
+
+    def _is_structural_spec_candidate(self, text: str, el) -> bool:
+        t = (text or "").strip()
+        if not t or len(t) > 60:
+            return False
+        if t in self.NON_SPEC_EXACT or self._is_spec_group_title(t):
+            return False
+        if any(token in t for token in self.NON_SPEC_CONTAINS):
+            return False
+        if any(token in t for token in ("₱", "￥", "¥", "PHP", "RMB")):
+            return False
+        if any(token in t for token in ("售罄", "无货", "库存不足", "不可选")):
+            return False
+        try:
+            if (el.get_attribute("enabled") or "").lower() == "false":
+                return False
+        except Exception:
+            pass
+        return True
+
+    def _click_structural_candidate(self, row, tag: str) -> bool:
+        _, _, _, _, text, el = row
+        try:
+            self._ctx.nearest_clickable_ancestor(el).click()
+            logger.info("已按元素结构选择规格项(%s): %s", tag, text[:40])
+            time.sleep(0.45)
+            return True
+        except Exception:
+            if self._ctx.try_click(el, f"结构规格项 {text[:24]}"):
+                logger.info("已按元素结构选择规格项(%s 自身): %s", tag, text[:40])
+                time.sleep(0.45)
+                return True
+        return False
+
+    def pick_specs_by_structure(self) -> bool:
+        """
+        以弹层元素结构选规格：
+        - 找规格组标题（规格/颜色/尺寸/款式等）
+        - 在该标题到下一个规格组或「数量」之间，点击第一个可用选项
+        - 文案只用于排除标题/按钮/数量，不用于判断业务规格类型
+        """
+        root = self._sheet_root()
+        rows = self._visible_textviews(root)
+        if not rows:
+            return False
+
+        quantity_y = min((r[0] for r in rows if r[4] == "数量"), default=None)
+        confirm_y = min(
+            (r[0] for r in rows if r[4] in ("确定", SHOP_TEXT_FINISH_SPEC, "立即购买", "加入购物车")),
+            default=None,
+        )
+        hard_bottom = min(v for v in (quantity_y, confirm_y) if v is not None) if (
+            quantity_y is not None or confirm_y is not None
+        ) else self._ctx.window_size()[1]
+
+        titles = [row for row in rows if self._is_spec_group_title(row[4]) and row[0] < hard_bottom]
+        clicked = 0
+        for idx, title in enumerate(titles):
+            title_y, title_x, title_x2, _, title_text, _ = title
+            next_title_y = titles[idx + 1][0] if idx + 1 < len(titles) else hard_bottom
+            candidates = []
+            for row in rows:
+                y1, x1, _, _, text, el = row
+                same_row_right = abs(y1 - title_y) <= 18 and x1 > title_x2
+                below_title = title_y + 8 < y1 < next_title_y - 4
+                if not (same_row_right or below_title):
+                    continue
+                if self._is_structural_spec_candidate(text, el):
+                    candidates.append(row)
+            candidates.sort(key=lambda item: (item[0], item[1]))
+            if candidates and self._click_structural_candidate(candidates[0], title_text):
+                clicked += 1
+
+        if clicked:
+            return True
+
+        # 无明确标题时，选「已选/选择」之后、「数量/完成」之前的首个可点项。
+        top = max((r[3] for r in rows if r[4] in ("已选", "选择")), default=0)
+        candidates = [
+            row
+            for row in rows
+            if top < row[0] < hard_bottom
+            and self._is_structural_spec_candidate(row[4], row[5])
+        ]
+        candidates.sort(key=lambda item: (item[0], item[1]))
+        if candidates:
+            return self._click_structural_candidate(candidates[0], "fallback")
+        return False
 
     def try_pick_one_chip(self, root, tag: str) -> bool:
         if not root:
@@ -105,9 +304,9 @@ class MallSpecSheet:
             if self._ctx.first_displayed_by_pkg_id(SHOP_ID_DIALOG_CHOOSE_CONTAINER):
                 break
             time.sleep(0.35)
-        picked = False
+        picked = self.pick_specs_by_structure()
         sku_root = self._ctx.first_displayed_by_pkg_id(SHOP_ID_CHOOSE_SKU_CONTAINER)
-        if self.try_pick_one_chip(sku_root, "choose_sku"):
+        if not picked and self.try_pick_one_chip(sku_root, "choose_sku"):
             picked = True
         if not picked:
             rv = self._ctx.first_displayed_by_pkg_id(SHOP_ID_CHOOSE_RECYCLER)

@@ -24,11 +24,8 @@ def run(page: ShopHomeFlowPage) -> bool:
         logger.warning(
             "日用百货：离开分类页后仍未确认商城首页，仍尝试限时特价/新品优选"
         )
-    for _mall_try in range(3):
-        if page.ensure_mall_tab(1.0):
-            break
-        time.sleep(0.75)
-    else:
-        logger.warning("返回后多次点击「商城」Tab 未成功，仍继续后续步骤")
+        recover = getattr(page, "force_recover_mall_home_main_list", None)
+        if callable(recover):
+            recover(attempts=2)
     time.sleep(0.55)
     return True

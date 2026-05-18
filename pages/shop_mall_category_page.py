@@ -182,19 +182,66 @@ class MallCategoryPage:
         return self.tap_mall_category_in_all_categories_popup(SHOP_TEXT_DAILY_BAIHUO)
 
     def leave_mall_category_to_mall_home(self) -> bool:
-        for i in range(5):
+        for i in range(6):
             if self._o._is_mall_home_main_list_visible():
                 logger.info("已回到商城首页（主列表 rv_content 可见）")
                 return True
             logger.info("离开分类/子页：第 %d 次尝试返回", i + 1)
-            self._o.tap_top_back()
-            time.sleep(1.0)
-        logger.warning("多次返回后仍未见 rv_content，尝试点商城 Tab 并手势回顶")
+            if not self._tap_category_back_direct():
+                self._o.tap_top_back()
+            end = time.time() + 2.5
+            while time.time() < end:
+                if self._o._is_mall_home_main_list_visible():
+                    logger.info("分类页返回后已回到商城首页（rv_content 可见）")
+                    return True
+                time.sleep(0.25)
+        logger.warning("多次返回后仍未见 rv_content，尝试恢复商城首页主列表")
+        recover = getattr(self._o, "force_recover_mall_home_main_list", None)
+        if callable(recover) and recover(attempts=2):
+            return True
         self._o.ensure_mall_tab()
         time.sleep(0.9)
         self._o.mall_list_gesture_scroll_to_top(8)
         time.sleep(0.45)
         return self._o._is_mall_home_main_list_visible()
+
+    def _tap_category_back_direct(self) -> bool:
+        """分类页固定左上角 ``iv_back``，优先当前包名直点，避免通用返回漏点。"""
+        try:
+            pkg = (self._o.driver.current_package or "").strip()
+        except Exception:
+            pkg = ""
+        packages = (pkg,) if pkg else ()
+        packages = packages + tuple(p for p in SHOP_PACKAGES if p != pkg)
+        for package in packages:
+            if not package:
+                continue
+            rid = self._o._rid(package, "iv_back")
+            try:
+                for el in self._o.driver.find_elements(AppiumBy.ID, rid):
+                    try:
+                        if not el.is_displayed():
+                            continue
+                        try:
+                            el.click()
+                        except Exception:
+                            loc = el.location
+                            sz = el.size
+                            self._o.driver.execute_script(
+                                "mobile: clickGesture",
+                                {
+                                    "x": int(loc["x"] + sz["width"] / 2),
+                                    "y": int(loc["y"] + sz["height"] / 2),
+                                },
+                            )
+                        logger.info("已直点分类页返回（%s）", rid)
+                        time.sleep(0.8)
+                        return True
+                    except Exception:
+                        continue
+            except Exception:
+                continue
+        return False
 
     def uia2_scroll_rv_goods_to_beginning(self) -> bool:
         for pkg in SHOP_PACKAGES:

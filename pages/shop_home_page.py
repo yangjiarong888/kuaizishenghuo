@@ -1,12 +1,21 @@
 """商城首页自动化：金刚区、返回、购物车、Banner、加购与多规格弹窗。"""
 from __future__ import annotations
 
+import argparse
+import os
+import sys
 import time
+from pathlib import Path
 from typing import List, Optional, Tuple, Any
+
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from appium.webdriver.common.appiumby import AppiumBy
 from selenium.webdriver.remote.webdriver import WebDriver
 
+from commons.driver import DriverManager
 from commons.logger import setup_logger
 from pages.shop_locators import (
     SHOP_BACK_ID_SUFFIXES,
@@ -119,6 +128,10 @@ class ShopHomePage:
                     continue
         except Exception:
             pass
+        if self._tap_mall_bottom_tab_by_coordinate():
+            logger.info("已点击底部「商城」Tab（坐标兜底）")
+            time.sleep(settle)
+            return True
         logger.error("未点到底部「商城」Tab")
         return False
 
@@ -460,12 +473,19 @@ class ShopHomePage:
         *,
         y_min_ratio: float = 0.16,
         y_max_ratio: float = 0.72,
+        activity_filter_only: bool = False,
     ) -> bool:
         """
         点击商城主区带指定文案的筛选项/标题（如「限时特价」「新品优选」）。
         用多段纵向带避免点到底部导航或悬浮购物车。
         Inspector：活动条/横滑筛选项常为 ``activity_filter``（TextView，文案随活动变）。
+
+        搜索页也可能有「限时特价」筛选文案；传 ``activity_filter_only=True`` 时只点
+        商城首页活动条 ``activity_filter``，不走宽松文案兜底。
         """
+        if activity_filter_only and self._search_page_like_visible():
+            logger.warning("当前像搜索页，跳过商城首页活动条「%s」点击", text)
+            return False
         h = self._window_size()[1]
         bands = (
             (y_min_ratio, y_max_ratio),
@@ -497,6 +517,8 @@ class ShopHomePage:
                             continue
                 except Exception:
                     pass
+            if activity_filter_only:
+                continue
             try:
                 for el in self.driver.find_elements(
                     AppiumBy.XPATH, f'//*[@text="{text}"]'
@@ -537,6 +559,21 @@ class ShopHomePage:
         logger.warning("未命中可点击文案「%s」", text)
         return False
 
+    def _search_page_like_visible(self) -> bool:
+        """商城搜索页/搜索结果页也有同名筛选项，活动条点击前先排除。"""
+        try:
+            act = (self.driver.current_activity or "").lower()
+            if "search" in act:
+                return True
+        except Exception:
+            pass
+        try:
+            src = self.driver.page_source or ""
+        except Exception:
+            return False
+        markers = ("历史搜索", "热门搜索", "搜索商品", "搜索商家或商品", "搜索结果")
+        return any(m in src for m in markers)
+
     def run_mall_filter_limited_special_toggle(self) -> bool:
         """
         限时特价/限时秒杀：点开筛选 → 首屏等待 → 下滑浏览（每滑一次等待渲染）
@@ -545,7 +582,10 @@ class ShopHomePage:
         opened = False
         for label in (SHOP_TEXT_LIMITED_SPECIAL, SHOP_TEXT_LIMITED_SPECIAL_ALT):
             if self.tap_mall_text_filter(
-                label, y_min_ratio=0.18, y_max_ratio=0.72
+                label,
+                y_min_ratio=0.18,
+                y_max_ratio=0.72,
+                activity_filter_only=True,
             ):
                 opened = True
                 break
@@ -554,15 +594,34 @@ class ShopHomePage:
         logger.info("限时特价/秒杀筛选已打开，首屏等待 5.0s（列表渲染）")
         time.sleep(5.0)
         self.swipe_mall_main_list_down(5, settle_sec=5.0)
+        self.recover_mall_list_to_show_tab_bar()
         closed = False
         for label in (SHOP_TEXT_LIMITED_SPECIAL, SHOP_TEXT_LIMITED_SPECIAL_ALT):
             if self.tap_mall_text_filter(
-                label, y_min_ratio=0.14, y_max_ratio=0.78
+                label,
+                y_min_ratio=0.14,
+                y_max_ratio=0.78,
+                activity_filter_only=True,
             ):
                 closed = True
                 break
         if not closed:
-            logger.warning("活动条第二次点击未命中，可能已还原或文案已变")
+            logger.warning("活动条第二次点击未命中，追加强回顶后重试")
+            self.mall_list_gesture_scroll_to_top(
+                20, x_ratio=0.50, y_start_ratio=0.40, y_end_ratio=0.88
+            )
+            time.sleep(0.5)
+            for label in (SHOP_TEXT_LIMITED_SPECIAL, SHOP_TEXT_LIMITED_SPECIAL_ALT):
+                if self.tap_mall_text_filter(
+                    label,
+                    y_min_ratio=0.14,
+                    y_max_ratio=0.78,
+                    activity_filter_only=True,
+                ):
+                    closed = True
+                    break
+        if not closed:
+            logger.warning("活动条第二次点击仍未命中，可能已自动还原或文案已变")
             return False
         logger.info("已完成活动条（限时特价/秒杀）：浏览后关筛选")
         time.sleep(0.4)
@@ -601,8 +660,79 @@ class ShopHomePage:
         """
         self._category.recover_mall_category_goods_list_to_top()
 
+    def uia2_scroll_mall_content_to_beginning(self) -> bool:
+        """商城首页 ``rv_content`` 回到列表顶部，比全屏手势更稳定。"""
+        for pkg in self._shop_packages_prioritized():
+            rid = self._rid(pkg, SHOP_ID_RV_CONTENT)
+            expr = (
+                f'new UiScrollable(new UiSelector().scrollable(true).resourceId("{rid}"))'
+                ".scrollToBeginning(20)"
+            )
+            try:
+                self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, expr)
+                logger.info("UiScrollable：rv_content 已 scrollToBeginning（%s）", pkg)
+                time.sleep(0.55)
+                return True
+            except Exception:
+                continue
+        return False
+
     def _kingkong_hot_snacks_label_visible(self) -> bool:
         return self._home_chrome.kingkong_hot_snacks_label_visible()
+
+    def _tap_mall_bottom_tab_by_coordinate(self) -> bool:
+        """底部 Tab 无可读 text/id 时的坐标兜底，点击后再由主列表标识校验。"""
+        w, h = self._window_size()
+        y = min(max(int(h * 0.965), h + 60), 2360)
+        for xf in (0.50, 0.58, 0.42, 0.66):
+            try:
+                self.driver.execute_script(
+                    "mobile: clickGesture",
+                    {"x": int(w * xf), "y": y},
+                )
+                logger.info("底部「商城」Tab 坐标兜底点击 x=%.2f y=%d", xf, y)
+                time.sleep(1.0)
+                if self._is_mall_home_main_list_visible() or self._kingkong_hot_snacks_label_visible():
+                    return True
+            except Exception:
+                continue
+        return False
+
+    def force_recover_mall_home_main_list(self, attempts: int = 4) -> bool:
+        """
+        从活动页/长列表/分类页等不稳定状态回到商城首页主列表。
+
+        限时特价/新品优选本身就在商城首页主列表区域，优先只做回顶/手势恢复；
+        底部「商城」Tab 只作为最后兜底，避免在商城页内反复点击底栏造成扰动。
+        """
+        for i in range(max(1, attempts)):
+            if self._is_mall_home_main_list_visible():
+                logger.info("商城首页主列表已可见（rv_content）")
+                return True
+            logger.info("恢复商城首页主列表：第 %d/%d 轮", i + 1, attempts)
+            self.tap_back_to_top_if_visible(warn_when_missing=False)
+            time.sleep(0.35)
+            if self._is_mall_home_main_list_visible():
+                return True
+            if self.uia2_scroll_mall_content_to_beginning():
+                return True
+            self.mall_list_gesture_scroll_to_top(
+                20, x_ratio=0.50, y_start_ratio=0.40, y_end_ratio=0.88
+            )
+            time.sleep(0.45)
+            if self._is_mall_home_main_list_visible():
+                return True
+            self.tap_top_back()
+            time.sleep(0.7)
+        if self.ensure_mall_tab(settle=1.0) or self._tap_mall_bottom_tab_by_coordinate():
+            self.mall_list_gesture_scroll_to_top(6)
+            time.sleep(0.4)
+        ok = self._is_mall_home_main_list_visible()
+        if ok:
+            logger.info("商城首页主列表恢复成功")
+        else:
+            logger.error("多轮恢复后仍未发现商城首页主列表 rv_content")
+        return ok
 
     def recover_mall_list_to_show_tab_bar(self) -> None:
         """
@@ -613,10 +743,14 @@ class ShopHomePage:
             time.sleep(0.55)
             if self._is_mall_home_main_list_visible():
                 return
+        if self.uia2_scroll_mall_content_to_beginning():
+            return
         logger.info(
             "无「回到顶部」或主列表仍不可见：手势拉回商城首页上方（Tab/金刚区）"
         )
-        self.mall_list_gesture_scroll_to_top(8)
+        self.mall_list_gesture_scroll_to_top(
+            20, x_ratio=0.50, y_start_ratio=0.40, y_end_ratio=0.88
+        )
         time.sleep(0.4)
 
     def tap_new_product_prefer_tab(self) -> bool:
@@ -742,7 +876,7 @@ class ShopHomePage:
             )
             self.mall_list_gesture_scroll_to_top(8)
             time.sleep(0.5)
-        return True
+        return self.force_recover_mall_home_main_list(attempts=3)
 
     def _tx_looks_like_mall_spec_chip(self, tx: str) -> bool:
         return self._spec.tx_looks_like_mall_spec_chip(tx)
@@ -758,12 +892,37 @@ class ShopHomePage:
         return self._spec.tap_confirm_button()
 
     def _is_mall_home_main_list_visible(self) -> bool:
-        return self._first_displayed_by_pkg_id(SHOP_ID_RV_CONTENT) is not None
+        if self._first_displayed_by_pkg_id(SHOP_ID_RV_CONTENT) is not None:
+            return True
+        try:
+            src = self.driver.page_source or ""
+        except Exception:
+            return False
+        return (
+            f":id/{SHOP_ID_RV_CONTENT}" in src
+            and ":id/rv_goods" not in src
+            and "MallCategoryActivity" not in (self.driver.current_activity or "")
+        )
 
     def _is_mall_product_detail_visible(self) -> bool:
         if self._first_displayed_by_pkg_id(SHOP_ID_MALL_ADD_SHOP_CAR):
             return True
-        return self._first_displayed_by_pkg_id(SHOP_ID_MALL_DETAIL_VIEWPAGER) is not None
+        if self._first_displayed_by_pkg_id(SHOP_ID_MALL_DETAIL_VIEWPAGER):
+            return True
+        try:
+            act = (self.driver.current_activity or "").lower()
+            if "mallgoodsdetail" in act or "goodsdetail" in act:
+                return True
+        except Exception:
+            pass
+        try:
+            src = self.driver.page_source or ""
+        except Exception:
+            return False
+        return (
+            ("立即购买" in src or "加入购物车" in src or "mall_buy_now" in src)
+            and "goodsListItemLayout" not in src
+        )
 
     def _wait_substring_on_screen(self, sub: str, timeout: float = 3.5) -> bool:
         if not sub:
@@ -926,3 +1085,38 @@ class ShopHomePage:
 def run_shop_home_from_driver(driver: WebDriver, **kwargs: Any) -> bool:
     """供脚本直接调用。"""
     return ShopHomePage(driver).run_shop_home_flow(**kwargs)
+
+
+def main() -> int:
+    """允许直接执行：python pages/shop_home_page.py。"""
+    parser = argparse.ArgumentParser(description="商城首页真机流程")
+    parser.add_argument("--session", default="shop_home_page", help="DriverManager 会话名")
+    parser.add_argument("--cold", action="store_true", help="冷启动 App")
+    parser.add_argument(
+        "--start-mode",
+        choices=("cold", "activate", "off"),
+        default=None,
+        help="覆盖 START_MODE；默认 activate，除非指定 --cold",
+    )
+    parser.add_argument("--quit-driver", action="store_true", help="流程结束后关闭 Appium session")
+    args = parser.parse_args()
+
+    if args.cold:
+        os.environ["START_MODE"] = "cold"
+    elif args.start_mode is not None:
+        os.environ["START_MODE"] = args.start_mode
+    else:
+        os.environ["START_MODE"] = "activate"
+
+    driver = DriverManager().get_driver(session_name=args.session)
+    ok = False
+    try:
+        ok = ShopHomePage(driver).run_shop_home_flow()
+    finally:
+        if args.quit_driver:
+            DriverManager().close_driver(session_name=args.session)
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -10,6 +10,7 @@
   python scripts/run_shop_business.py --action im --keyword "牛奶" --message "你好，请问还有货吗？"
   python scripts/run_shop_business.py --action order --keyword "牛奶"
   python scripts/run_shop_business.py --action order --keyword "牛奶" --submit-order
+  python scripts/run_shop_business.py --action daily_order --submit-order  # 日用百货分类商品下单
   python scripts/run_shop_business.py --action full --keyword "牛奶" --message "你好，请问还有货吗？"
 
 默认只会到「确认订单/提交订单」页；只有显式传入 --submit-order 才点击提交订单。
@@ -36,7 +37,18 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="商城业务：搜索/详情/下单/IM/分享")
     parser.add_argument(
         "--action",
-        choices=("search", "detail", "order", "im", "share", "category", "activity", "explore", "full"),
+        choices=(
+            "search",
+            "detail",
+            "order",
+            "daily_order",
+            "im",
+            "share",
+            "category",
+            "activity",
+            "explore",
+            "full",
+        ),
         default="full",
         help="要执行的商城业务动作",
     )
@@ -108,6 +120,10 @@ def main() -> int:
         elif args.action == "order":
             ok = page.run_order_flow(
                 args.keyword,
+                submit_order=args.submit_order,
+            )
+        elif args.action == "daily_order":
+            ok = page.run_daily_baihuo_order_flow(
                 submit_order=args.submit_order,
             )
         elif args.action == "full":
