@@ -609,19 +609,22 @@ class MallOrderFlow(ShopBusinessPage):
         if not self._spec_bottom_sheet_visible():
             return None
         stock = self.read_stock_from_page()
-        for spec in self.specs:
-            if not self.tap_spec_text(spec):
-                raise AssertionError(f"规格弹层未找到指定规格：{spec}")
-            time.sleep(0.25)
-        for _ in range(self.quantity - 1):
-            add = self._first_displayed_by_pkg_id(SHOP_ID_COUNT_ADD)
-            if add and self._click_element_center(add, "数量加号"):
-                time.sleep(0.2)
-                continue
-            if not self.click_labels(("+",), desc="数量加号", y_min_ratio=0.35, y_max_ratio=1.0, exact=True):
-                raise AssertionError("规格弹层未找到数量加号，无法设置购买数量")
-        if not self._tap_mall_spec_sheet_confirm_button():
-            raise AssertionError("规格弹层未点到「完成/确定」按钮")
+        if self.specs:
+            for spec in self.specs:
+                if not self.tap_spec_text(spec):
+                    raise AssertionError(f"规格弹层未找到指定规格：{spec}")
+                time.sleep(0.25)
+            for _ in range(self.quantity - 1):
+                add = self._first_displayed_by_pkg_id(SHOP_ID_COUNT_ADD)
+                if add and self._click_element_center(add, "数量加号"):
+                    time.sleep(0.2)
+                    continue
+                if not self.click_labels(("+",), desc="数量加号", y_min_ratio=0.35, y_max_ratio=1.0, exact=True):
+                    raise AssertionError("规格弹层未找到数量加号，无法设置购买数量")
+            if not self._tap_mall_spec_sheet_confirm_button():
+                raise AssertionError("规格弹层未点到「完成/确定」按钮")
+        elif not self._mall_spec_popup_pick_and_confirm():
+            raise AssertionError("规格弹层未能按元素结构完成选择")
         time.sleep(1.2)
         return stock
 
@@ -653,12 +656,49 @@ class MallOrderFlow(ShopBusinessPage):
         reject_words = ("不满足", "未满足", "不能购买", "无法购买", "起购", "最低", "满", "不足")
         while time.time() < end:
             blob = self.page_blob()
+            if "低价换购" in blob or "确认换购" in blob or "放弃机会" in blob:
+                return False
             if any(a in blob for a in amount_words) and any(r in blob for r in reject_words):
                 return True
             if any(mark in blob for mark in ("低于起购金额", "未达到起购金额", "未达到最低购买金额")):
                 return True
             time.sleep(0.3)
         return False
+
+    def dismiss_checkout_upsell_if_visible(self) -> bool:
+        """确认订单页满额低价换购弹窗：放弃换购，继续主订单流程。"""
+        if not self.wait_page_contains_any(("低价换购", "确认换购", "放弃机会"), timeout=1.0):
+            return False
+        if self.click_labels(
+            ("放弃机会", "暂不换购", "不换购"),
+            desc="放弃换购",
+            y_min_ratio=0.50,
+            y_max_ratio=0.88,
+        ):
+            time.sleep(1.0)
+            logger.info("已关闭满额低价换购弹窗")
+            return True
+        raise AssertionError("出现低价换购弹窗，但未找到「放弃机会」")
+
+    def select_default_address_if_popup_visible(self) -> bool:
+        """提交后若出现「配送至」地址弹层，选择第一条可见地址。"""
+        if not self.wait_page_contains_any(("配送至", "选择其他收货地址"), timeout=1.0):
+            return False
+        for pkg in self._shop_packages_prioritized():
+            rid = self._rid(pkg, "tv_address")
+            try:
+                for el in self.driver.find_elements(AppiumBy.ID, rid):
+                    try:
+                        if not el.is_displayed():
+                            continue
+                        if self._click_element_center(el, "地址弹层第一条地址"):
+                            time.sleep(1.0)
+                            return True
+                    except Exception:
+                        continue
+            except Exception:
+                continue
+        raise AssertionError("出现地址选择弹层，但未能选择默认地址")
 
     # ---------- 预订时间 ----------
 
@@ -1267,14 +1307,17 @@ class MallOrderFlow(ShopBusinessPage):
 
     def submit_order(self, amounts: AmountSnapshot) -> SubmitResult:
         self.drain_logcat()
-        if not self.click_labels(
-            ("提交订单", "确认订单"),
-            desc="提交订单",
-            y_min_ratio=0.52,
-            y_max_ratio=1.0,
-        ):
-            raise AssertionError("未找到「提交订单」按钮")
-        time.sleep(1.5)
+        for _ in range(2):
+            if not self.click_labels(
+                ("提交订单", "确认订单"),
+                desc="提交订单",
+                y_min_ratio=0.52,
+                y_max_ratio=1.0,
+            ):
+                raise AssertionError("未找到「提交订单」按钮")
+            time.sleep(1.5)
+            if not self.select_default_address_if_popup_visible():
+                break
         if self.wait_page_contains_any(STOCKOUT_MARKERS, timeout=2.0):
             raise AssertionError("正常下单路径出现库存不足提示")
         if self.wait_page_contains_any(NETWORK_ERROR_MARKERS, timeout=1.0):
@@ -2530,6 +2573,24 @@ class MallOrderFlow(ShopBusinessPage):
             raise AssertionError("当前页面不是商品详情页")
         return self.read_detail_snapshot()
 
+    def open_daily_baihuo_detail_and_snapshot(self) -> ProductSnapshot:
+        """日用百货分类选品入口，复用 ShopBusinessPage 中已验证的分类路径。"""
+        if not self.ensure_mall_tab():
+            raise AssertionError("未能进入商城首页")
+        if not self.tap_mall_kingkong_daily_baihuo_via_popup():
+            raise AssertionError("未能进入「日用百货」分类")
+        time.sleep(1.0)
+        if not self._tap_first_category_goods_item(min_price=self.min_order_amount):
+            logger.warning(
+                "日用百货未找到价格 >= %.2f 的可见商品，改点首个可见商品",
+                self.min_order_amount,
+            )
+            if not self._tap_first_category_goods_item(min_price=None):
+                raise AssertionError("日用百货分类未能打开商品详情")
+        if not self._is_mall_product_detail_visible():
+            raise AssertionError("日用百货商品未进入详情页")
+        return self.read_detail_snapshot()
+
     def buy_now_to_checkout_exact_specs(self, product: ProductSnapshot) -> ProductSnapshot:
         under_min = (
             self.min_order_amount > 0
@@ -2606,6 +2667,7 @@ class MallOrderFlow(ShopBusinessPage):
         *,
         submit_order: bool,
     ) -> None:
+        self.dismiss_checkout_upsell_if_visible()
         amounts = self.assert_checkout_matches_detail(product)
         if self.ensure_test_address:
             self.ensure_test_address_from_checkout_flow(force_add=self.force_add_test_address)
@@ -2630,6 +2692,14 @@ class MallOrderFlow(ShopBusinessPage):
         product = self.buy_now_to_checkout_exact_specs(product)
         self.finish_checkout(product, submit_order=submit_order)
         logger.info("立即购买路径通过")
+        return True
+
+    def run_daily_baihuo_buy_now_flow(self, *, submit_order: bool) -> bool:
+        logger.info("开始日用百货立即购买路径")
+        product = self.open_daily_baihuo_detail_and_snapshot()
+        product = self.buy_now_to_checkout_exact_specs(product)
+        self.finish_checkout(product, submit_order=submit_order)
+        logger.info("日用百货立即购买路径通过")
         return True
 
     def run_cart_flow(self, keyword: str, *, submit_order: bool) -> bool:
@@ -2726,6 +2796,12 @@ class MallOrderFlow(ShopBusinessPage):
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="商城下单：立即购买/购物车提交订单 E2E")
     parser.add_argument("--flow", choices=("buy_now", "cart", "both"), default="both")
+    parser.add_argument(
+        "--product-source",
+        choices=("daily_baihuo", "search"),
+        default="daily_baihuo",
+        help="下单商品来源：默认走日用百货分类选品；search 走关键字搜索",
+    )
     parser.add_argument("--keyword", default="可乐", help="商品搜索关键字；默认搜索常见商品名「可乐」")
     parser.add_argument("--sku", default="123", help="库存/支付测试钩子使用的 SKU")
     parser.add_argument("--expected-name", default=None, help="商品名称断言；不传则从详情页读取")
@@ -2913,11 +2989,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = build_parser().parse_args()
-    specs = args.spec or ["黑色", "L"]
+    specs = args.spec or ([] if args.product_source == "daily_baihuo" else ["黑色", "L"])
     expected_name_contains = (
         args.expected_name_contains
         if args.expected_name_contains is not None
-        else args.keyword
+        else ("" if args.product_source == "daily_baihuo" else args.keyword)
     )
 
     if args.cold:
@@ -2982,7 +3058,10 @@ def main() -> int:
             ok = True
             return 0
         if args.flow in ("buy_now", "both"):
-            page.run_buy_now_flow(args.keyword, submit_order=args.submit_order)
+            if args.product_source == "daily_baihuo":
+                page.run_daily_baihuo_buy_now_flow(submit_order=args.submit_order)
+            else:
+                page.run_buy_now_flow(args.keyword, submit_order=args.submit_order)
             if args.flow == "both":
                 page.safe_back_to_mall()
         if args.flow in ("cart", "both"):

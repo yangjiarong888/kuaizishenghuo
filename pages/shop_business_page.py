@@ -310,6 +310,54 @@ class ShopBusinessPage(ShopHomePage):
         except Exception:
             return False
 
+    def _is_checkout_activity(self) -> bool:
+        return self._current_activity_contains("SubmitMallOrderActivity")
+
+    def _dismiss_checkout_upsell_if_visible(self) -> bool:
+        """确认订单页满额换购弹窗：不参与换购，继续提交主订单。"""
+        if not self._page_contains_any(("低价换购", "确认换购", "放弃机会")):
+            return False
+        if self._click_first_text_or_desc(
+            ("放弃机会", "暂不换购", "不换购"),
+            y_min_ratio=0.55,
+            y_max_ratio=0.85,
+            desc="关闭换购弹窗",
+        ):
+            time.sleep(1.0)
+            return True
+        w, h = self._window_size()
+        if self._adb_tap(int(w * 0.30), int(h * 0.72), desc="放弃换购"):
+            logger.info("已通过 ADB 坐标点击「放弃机会」")
+            time.sleep(1.0)
+            return True
+        return False
+
+    def _select_default_address_if_popup_visible(self) -> bool:
+        """确认订单页地址底弹层：选择第一条可见地址继续提交。"""
+        if not self._page_contains_any(("配送至", "选择其他收货地址")):
+            return False
+        for pkg in self._shop_packages_prioritized():
+            rid = self._rid(pkg, "tv_address")
+            try:
+                for el in self.driver.find_elements(AppiumBy.ID, rid):
+                    try:
+                        if not el.is_displayed():
+                            continue
+                        self._nearest_clickable_ancestor(el, max_hops=6).click()
+                        logger.info("已选择地址弹层第一条地址")
+                        time.sleep(1.0)
+                        return True
+                    except Exception:
+                        continue
+            except Exception:
+                continue
+        w, h = self._window_size()
+        if self._adb_tap(int(w * 0.50), int(h * 0.62), desc="选择默认地址"):
+            logger.info("已通过 ADB 坐标选择地址弹层第一条地址")
+            time.sleep(1.0)
+            return True
+        return False
+
     def _search_page_visible(self) -> bool:
         if self._current_activity_contains("NewSearchActivity"):
             return True
@@ -1235,7 +1283,12 @@ class ShopBusinessPage(ShopHomePage):
             if not self._mall_spec_popup_pick_and_confirm():
                 return False
             time.sleep(1.2)
+        if self._is_checkout_activity():
+            self._dismiss_checkout_upsell_if_visible()
+            logger.info("已进入确认订单页（SubmitMallOrderActivity）")
+            return True
         if self._wait_page_contains_any(self.CHECKOUT_MARKERS, timeout=10.0):
+            self._dismiss_checkout_upsell_if_visible()
             logger.info("已进入确认订单/提交订单页")
             return True
         logger.error("立即购买后未进入确认订单页")
@@ -1243,20 +1296,29 @@ class ShopBusinessPage(ShopHomePage):
 
     def submit_order_if_requested(self, submit_order: bool = False) -> bool:
         """默认不真正提交；submit_order=True 时点击提交订单。"""
-        if not self._page_contains_any(self.CHECKOUT_MARKERS):
+        if self._is_checkout_activity():
+            self._dismiss_checkout_upsell_if_visible()
+        if not self._is_checkout_activity() and not self._page_contains_any(self.CHECKOUT_MARKERS):
             logger.error("当前未识别为确认订单页")
             return False
         if not submit_order:
             logger.info("已停在确认订单页；未传 submit_order，不点击「提交订单」")
             return True
-        if not self._click_first_text_or_desc(
-            ("提交订单", "确认订单", "立即支付", "去支付"),
-            y_min_ratio=0.55,
-            y_max_ratio=1.0,
-            desc="提交订单",
-        ):
-            logger.error("未找到提交订单按钮")
-            return False
+        for attempt in range(2):
+            self._select_default_address_if_popup_visible()
+            if not self._click_first_text_or_desc(
+                ("提交订单", "确认订单", "立即支付", "去支付"),
+                y_min_ratio=0.55,
+                y_max_ratio=1.0,
+                desc="提交订单",
+            ):
+                if attempt == 0 and self._select_default_address_if_popup_visible():
+                    continue
+                logger.error("未找到提交订单按钮")
+                return False
+            time.sleep(1.0)
+            if not self._select_default_address_if_popup_visible():
+                break
         ok = self._wait_page_contains_any(self.ORDER_DONE_MARKERS, timeout=12.0)
         if ok:
             logger.info("提交订单后已出现订单/支付相关页面")

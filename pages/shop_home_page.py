@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -87,8 +88,89 @@ class ShopHomePage:
     def _all_displayed_by_pkg_id(self, suffix: str) -> List:
         return self._mall_ctx.all_displayed_by_pkg_id(suffix)
 
+    def close_home_activity_popup_if_visible(self, attempts: int = 8) -> bool:
+        """关闭首页活动/广告弹窗，避免遮挡底部「商城」Tab。"""
+        closed = False
+        w, h = self._window_size()
+        text_xpaths = (
+            '//*[@content-desc="关闭"]',
+            '//*[@text="关闭"]',
+            '//*[@text="跳过"]',
+            '//*[contains(@resource-id,"iv_close")]',
+            '//*[contains(@resource-id,"btn_close")]',
+        )
+        with self._mall_ctx.zero_implicit_wait():
+            for _ in range(max(1, attempts)):
+                hit = False
+                for pkg in self._shop_packages_prioritized():
+                    try:
+                        for el in self.driver.find_elements(
+                            AppiumBy.ID, self._rid(pkg, "iv_close")
+                        ):
+                            try:
+                                if not el.is_displayed() or not el.is_enabled():
+                                    continue
+                                y = int(el.location.get("y", 0))
+                                if y > int(h * 0.92):
+                                    continue
+                                el.click()
+                                logger.info("已关闭首页活动弹窗（%s:id/iv_close）", pkg)
+                                time.sleep(0.8)
+                                closed = True
+                                hit = True
+                                break
+                            except Exception:
+                                continue
+                    except Exception:
+                        continue
+                    if hit:
+                        break
+                if hit:
+                    continue
+                for xp in text_xpaths:
+                    try:
+                        for el in self.driver.find_elements(AppiumBy.XPATH, xp):
+                            try:
+                                if not el.is_displayed() or not el.is_enabled():
+                                    continue
+                                loc = el.location
+                                size = el.size
+                                cx = int(loc.get("x", 0) + size.get("width", 0) * 0.5)
+                                cy = int(loc.get("y", 0) + size.get("height", 0) * 0.5)
+                                if cy > int(h * 0.92):
+                                    continue
+                                try:
+                                    el.click()
+                                except Exception:
+                                    self.driver.execute_script(
+                                        "mobile: clickGesture", {"x": cx, "y": cy}
+                                    )
+                                logger.info("已关闭首页活动弹窗（%s）", xp)
+                                time.sleep(0.8)
+                                closed = True
+                                hit = True
+                                break
+                            except Exception:
+                                continue
+                    except Exception:
+                        continue
+                    if hit:
+                        break
+                if not hit:
+                    time.sleep(0.35)
+        if closed:
+            time.sleep(0.4)
+        return closed
+
     def ensure_mall_tab(self, settle: float = 1.2) -> bool:
         """点击底部「商城」Tab（与外卖 Tab 同类 resource-id 结构）。"""
+        self.close_home_activity_popup_if_visible()
+        if self._tap_mall_bottom_tab_by_coordinate():
+            logger.info("已点击底部「商城」Tab（坐标优先）")
+            time.sleep(settle)
+            return True
+        if self._tap_mall_bottom_tab_by_structure(settle=settle):
+            return True
         h = self._window_size()[1]
         y_min = int(h * 0.66)
         for pkg in SHOP_PACKAGES:
@@ -683,19 +765,98 @@ class ShopHomePage:
     def _tap_mall_bottom_tab_by_coordinate(self) -> bool:
         """底部 Tab 无可读 text/id 时的坐标兜底，点击后再由主列表标识校验。"""
         w, h = self._window_size()
-        y = min(max(int(h * 0.965), h + 60), 2360)
+        y = min(h - 24, 2200)
         for xf in (0.50, 0.58, 0.42, 0.66):
+            x = int(w * xf)
+            if self._adb_tap(x, y, desc="底部「商城」Tab 坐标"):
+                logger.info("底部「商城」Tab ADB 坐标点击 x=%.2f y=%d", xf, y)
+                time.sleep(1.0)
+                return True
             try:
                 self.driver.execute_script(
                     "mobile: clickGesture",
-                    {"x": int(w * xf), "y": y},
+                    {"x": x, "y": y},
                 )
                 logger.info("底部「商城」Tab 坐标兜底点击 x=%.2f y=%d", xf, y)
                 time.sleep(1.0)
-                if self._is_mall_home_main_list_visible() or self._kingkong_hot_snacks_label_visible():
-                    return True
+                return True
             except Exception:
                 continue
+        return False
+
+    def _tap_mall_bottom_tab_by_structure(self, settle: float = 1.2) -> bool:
+        """
+        首页底栏在部分机型上 ``tab_text_tv`` 的 bounds 为 0，不能按文字节点可见性点击。
+        直接取底部 5 个 ``ll_tab_content`` 容器中的第 3 个（商城）并点其可点击父节点。
+        """
+        h = self._window_size()[1]
+        candidates = []
+        with self._mall_ctx.zero_implicit_wait():
+            for pkg in self._shop_packages_prioritized():
+                rid = self._rid(pkg, "ll_tab_content")
+                try:
+                    for el in self.driver.find_elements(AppiumBy.ID, rid):
+                        try:
+                            loc = el.location
+                            size = el.size
+                            x = int(loc.get("x", 0))
+                            y = int(loc.get("y", 0))
+                            width = int(size.get("width", 0))
+                            height = int(size.get("height", 0))
+                            if width <= 0 or height <= 0 or y < int(h * 0.75):
+                                continue
+                            candidates.append((x, y, el))
+                        except Exception:
+                            continue
+                except Exception:
+                    continue
+                if candidates:
+                    break
+        candidates.sort(key=lambda item: item[0])
+        if len(candidates) < 3:
+            return False
+        _, _, el = candidates[2]
+        try:
+            target = self._nearest_clickable_ancestor(el, max_hops=4)
+            target.click()
+            logger.info("已按底栏结构点击第 3 个 Tab（商城）")
+            time.sleep(settle)
+            return True
+        except Exception:
+            try:
+                loc = el.location
+                size = el.size
+                cx = int(loc.get("x", 0) + size.get("width", 0) * 0.5)
+                cy = int(loc.get("y", 0) + size.get("height", 0) * 0.5)
+                self.driver.execute_script("mobile: clickGesture", {"x": cx, "y": cy})
+                logger.info("已按底栏结构坐标点击第 3 个 Tab（商城）")
+                time.sleep(settle)
+                return True
+            except Exception:
+                return False
+
+    def _adb_tap(self, x: int, y: int, *, desc: str = "坐标") -> bool:
+        serial = ""
+        try:
+            caps = getattr(self.driver, "capabilities", None) or {}
+            serial = str(caps.get("appium:udid") or caps.get("udid") or "").strip()
+            if not serial:
+                serial = str(
+                    caps.get("appium:deviceName") or caps.get("deviceName") or ""
+                ).strip()
+        except Exception:
+            serial = ""
+        cmd = ["adb"]
+        if serial:
+            cmd.extend(["-s", serial])
+        cmd.extend(["shell", "input", "tap", str(int(x)), str(int(y))])
+        try:
+            cp = subprocess.run(cmd, capture_output=True, text=True, timeout=4)
+            if cp.returncode == 0:
+                return True
+            logger.debug("%s ADB tap 失败: %s", desc, (cp.stderr or cp.stdout).strip())
+        except Exception as ex:
+            logger.debug("%s ADB tap 异常: %s", desc, ex)
         return False
 
     def force_recover_mall_home_main_list(self, attempts: int = 4) -> bool:
