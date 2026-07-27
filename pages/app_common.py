@@ -1,45 +1,14 @@
 """共享配置与日志，避免 Home 与 takeout/shipping 循环导入。"""
 
-import logging
 import os
-import subprocess
-import sys
-from datetime import datetime
 
 from appium.options.android import UiAutomator2Options
 
-
-def setup_logger(name=__name__):
-    """配置日志系统"""
-    logs_dir = os.path.join(os.getcwd(), "logs")
-    os.makedirs(logs_dir, exist_ok=True)
-    log_filename = os.path.join(
-        logs_dir, f'chopsticks_test_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'
-    )
-
-    lg = logging.getLogger(name)
-    lg.setLevel(logging.INFO)
-
-    if not lg.handlers:
-        try:
-            if hasattr(sys.stdout, "reconfigure"):
-                sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-        except Exception:
-            pass
-
-        file_handler = logging.FileHandler(log_filename, encoding="utf-8")
-        console_handler = logging.StreamHandler(sys.stdout)
-
-        formatter = logging.Formatter(
-            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-        )
-        file_handler.setFormatter(formatter)
-        console_handler.setFormatter(formatter)
-
-        lg.addHandler(file_handler)
-        lg.addHandler(console_handler)
-
-    return lg
+from commons.android_runtime import (
+    detect_first_adb_device_id,
+    detect_launchable_activity,
+)
+from commons.logger import setup_logger
 
 
 logger = setup_logger()
@@ -53,50 +22,8 @@ class AppConfig:
     SHORT_WAIT = 3
     ARTIFACTS_DIR = os.environ.get("ARTIFACTS_DIR", os.path.join(os.getcwd(), "logs"))
 
-    @staticmethod
-    def _detect_first_adb_device_id():
-        """从 adb 获取第一台已连接设备 ID；失败返回 None"""
-        try:
-            cp = subprocess.run(
-                ["adb", "devices"], capture_output=True, text=True, timeout=8
-            )
-            if cp.returncode != 0:
-                return None
-            lines = [ln.strip() for ln in cp.stdout.splitlines() if ln.strip()]
-            for ln in lines[1:]:
-                parts = ln.split()
-                if len(parts) >= 2 and parts[1] == "device":
-                    return parts[0]
-            return None
-        except Exception:
-            return None
-
-    @staticmethod
-    def _detect_launchable_activity(app_package: str):
-        """自动解析可启动 Activity；失败返回 None"""
-        try:
-            cp = subprocess.run(
-                ["adb", "shell", "cmd", "package", "resolve-activity", "--brief", app_package],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            if cp.returncode != 0:
-                return None
-            lines = [ln.strip() for ln in cp.stdout.splitlines() if ln.strip()]
-            if not lines:
-                return None
-            component = lines[-1]
-            if "/" not in component:
-                return None
-            pkg, act = component.split("/", 1)
-            if not pkg or not act:
-                return None
-            if act.startswith("."):
-                return f"{pkg}{act}"
-            return act
-        except Exception:
-            return None
+    _detect_first_adb_device_id = staticmethod(detect_first_adb_device_id)
+    _detect_launchable_activity = staticmethod(detect_launchable_activity)
 
     @staticmethod
     def get_android_options():
