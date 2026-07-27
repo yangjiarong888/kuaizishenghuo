@@ -337,7 +337,7 @@ send_im_after_order=args.send_order_im and not args.skip_order_im
 
 Expected: all focused tests pass; full suite has zero failures.
 
-- [ ] **Step 9: Commit Task 1**
+- [x] **Step 9: Commit Task 1**
 
 ```powershell
 git add -- scripts/run_mall_order_flow.py testcases/test_mall_order_safety.py
@@ -357,9 +357,9 @@ git commit -m "fix: enforce mall mutation capabilities"
 
 **Interfaces:**
 - Consumes: URL templates, `sku`, `quantity`, `SubmitResult`.
-- Produces: `MallOrderHttpClient`, `call_json_url(url: str, *, timeout: float = 10.0) -> Any`, `find_first_json_value(data: Any, keys: Sequence[str]) -> Optional[Any]`, `read_stock() -> Optional[int]`, `mock_payment_success(order_no: str, amount: float) -> None`, `assert_order_wait_ship(order_no: str) -> None`.
+- Produces: `MallOrderHttpClient`, compatible `call_json_url(url_template, *, payload=None, method="POST", timeout=12.0) -> Any`, `find_first_json_value(data: Any, keys: Sequence[str]) -> Optional[Any]`, `read_stock() -> Optional[int]`, `mock_payment_success(order_no: str, amount: float) -> Any`, `assert_order_wait_ship(order_no: str) -> bool`.
 
-- [ ] **Step 1: Write failing pure HTTP tests**
+- [x] **Step 1: Write failing pure HTTP tests**
 
 ```python
 def test_call_json_url_decodes_json_with_injected_opener():
@@ -457,7 +457,7 @@ def make_client(opener, **overrides):
     return MallOrderHttpClient(**values)
 ```
 
-- [ ] **Step 2: Write failing stock and order-status tests**
+- [x] **Step 2: Write failing stock and order-status tests**
 
 ```python
 def test_read_stock_formats_sku_and_returns_integer():
@@ -489,7 +489,7 @@ def test_order_status_must_reach_wait_ship_state():
     client.assert_order_wait_ship("ORDER-1")
 ```
 
-- [ ] **Step 3: Run HTTP tests and verify RED**
+- [x] **Step 3: Run HTTP tests and verify RED**
 
 ```powershell
 & '..\Scripts\python.exe' -m pytest testcases\test_mall_order_http.py -q
@@ -497,7 +497,7 @@ def test_order_status_must_reach_wait_ship_state():
 
 Expected: import failure for missing `flows.mall_order_http`; add only importable class/function skeletons if needed, then verify behavior assertions fail.
 
-- [ ] **Step 4: Implement the client**
+- [x] **Step 4: Implement the client**
 
 ```python
 class MallOrderHttpError(RuntimeError):
@@ -536,9 +536,9 @@ class MallOrderHttpClient:
             raise MallOrderHttpError("invalid JSON response") from exc
 ```
 
-Implement recursive `find_first_json_value()`, URL placeholder quoting with `urllib.parse.quote`, integer stock parsing, mock-payment URL formatting, and order-state validation using the existing accepted markers. If a stock URL is configured but its response has no recognized stock field, raise `MallOrderHttpError` rather than silently returning `None`.
+Implement recursive `find_first_json_value()`, URL placeholder quoting with `urllib.parse.quote`, `urllib.request.Request` construction that preserves the existing GET/POST and JSON-body contract, integer stock parsing, mock-payment URL formatting, and order-state validation using the existing accepted markers. If a stock URL is configured but its response has no recognized stock field, raise `MallOrderHttpError` rather than silently returning `None`.
 
-- [ ] **Step 5: Delegate from `MallOrderFlow` without breaking public names**
+- [x] **Step 5: Delegate from `MallOrderFlow` without breaking public names**
 
 Create the client in `MallOrderFlow.__init__`:
 
@@ -564,7 +564,7 @@ def find_first_json_value(data, keys):
     return find_first_json_value(data, keys)
 ```
 
-- [ ] **Step 6: Run focused and full tests**
+- [x] **Step 6: Run focused and full tests**
 
 ```powershell
 & '..\Scripts\python.exe' -m pytest `

@@ -34,14 +34,11 @@ from __future__ import annotations
 
 import argparse
 import html
-import json
 import os
 import random
 import re
 import sys
 import time
-import urllib.error
-import urllib.request
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -55,6 +52,11 @@ if str(ROOT) not in sys.path:
 from commons.driver import DriverManager
 from commons.diagnostics import capture_failure
 from commons.logger import setup_logger
+from flows.mall_order_http import (
+    MallOrderHttpClient,
+    MallOrderHttpError,
+    find_first_json_value,
+)
 from flows.mall_order_types import (
     AmountSnapshot,
     ProductSnapshot,
@@ -291,6 +293,13 @@ class MallOrderFlow(ShopBusinessPage):
         self.address_phone = (address_phone or DEFAULT_ADDRESS_PHONE).strip()
         self.address_wechat = (address_wechat or DEFAULT_ADDRESS_WECHAT).strip()
         self.address_detail = (address_detail or DEFAULT_ADDRESS_DETAIL).strip()
+        self.http = MallOrderHttpClient(
+            sku=self.sku,
+            quantity=self.quantity,
+            stock_api_url=self.stock_api_url,
+            order_status_api_url=self.order_status_api_url,
+            mock_pay_success_url=self.mock_pay_success_url,
+        )
 
     # ---------- 通用读取与点击 ----------
 
@@ -451,13 +460,10 @@ class MallOrderFlow(ShopBusinessPage):
         return None
 
     def read_stock_by_api(self) -> Optional[int]:
-        if not self.stock_api_url:
-            return None
-        data = self.call_json_url(self.stock_api_url, payload={"sku": self.sku}, method="GET")
-        stock = self.find_first_json_value(data, ("stock", "inventory", "availableStock"))
-        if stock is None:
-            raise AssertionError(f"库存接口未返回 stock/inventory 字段：{data}")
-        return int(stock)
+        try:
+            return self.http.read_stock()
+        except MallOrderHttpError as exc:
+            raise AssertionError(str(exc)) from exc
 
     def read_probable_product_name_from_texts(self) -> str:
         ban = (
@@ -1355,55 +1361,28 @@ class MallOrderFlow(ShopBusinessPage):
         payload: Optional[Dict[str, Any]] = None,
         method: str = "POST",
     ) -> Any:
-        values = {
-            "sku": self.sku,
-            "order_no": (payload or {}).get("order_no", ""),
-            "amount": (payload or {}).get("amount", ""),
-            "quantity": self.quantity,
-        }
-        url = url_template.format(**values)
-        body = None
-        headers = {"Accept": "application/json"}
-        if method.upper() != "GET":
-            body = json.dumps(payload or {}, ensure_ascii=False).encode("utf-8")
-            headers["Content-Type"] = "application/json"
-        req = urllib.request.Request(url, data=body, headers=headers, method=method.upper())
         try:
-            with urllib.request.urlopen(req, timeout=12) as resp:
-                raw = resp.read().decode("utf-8", errors="replace")
-        except urllib.error.URLError as ex:
-            raise AssertionError(f"调用测试钩子失败：{url} -> {ex}") from ex
-        if not raw.strip():
-            return {}
-        try:
-            return json.loads(raw)
-        except json.JSONDecodeError:
-            return {"raw": raw}
+            return self.http.call_json_url(
+                url_template,
+                payload=payload,
+                method=method,
+            )
+        except MallOrderHttpError as exc:
+            raise AssertionError(str(exc)) from exc
 
     @staticmethod
     def find_first_json_value(data: Any, keys: Sequence[str]) -> Optional[Any]:
-        if isinstance(data, dict):
-            for key in keys:
-                if key in data:
-                    return data[key]
-            for value in data.values():
-                got = MallOrderFlow.find_first_json_value(value, keys)
-                if got is not None:
-                    return got
-        elif isinstance(data, list):
-            for value in data:
-                got = MallOrderFlow.find_first_json_value(value, keys)
-                if got is not None:
-                    return got
-        return None
+        return find_first_json_value(data, keys)
 
     def mock_payment_success(self, submit: SubmitResult) -> None:
         if self.mock_pay_success_url:
-            data = self.call_json_url(
-                self.mock_pay_success_url,
-                payload={"order_no": submit.order_no, "amount": submit.cashier_amount},
-                method="POST",
-            )
+            try:
+                data = self.http.mock_payment_success(
+                    submit.order_no,
+                    submit.cashier_amount,
+                )
+            except MallOrderHttpError as exc:
+                raise AssertionError(str(exc)) from exc
             logger.info("支付成功测试钩子返回：%s", data)
             try:
                 app_pkg = self.driver.current_package
@@ -1424,28 +1403,12 @@ class MallOrderFlow(ShopBusinessPage):
         raise AssertionError("未配置 --mock-pay-success-url，且页面未找到支付成功模拟按钮")
 
     def assert_order_wait_ship(self, order_no: str) -> None:
-        status = None
         if self.order_status_api_url:
-            data = self.call_json_url(
-                self.order_status_api_url,
-                payload={"order_no": order_no},
-                method="GET",
-            )
-            status = self.find_first_json_value(data, ("statusText", "status", "orderStatus"))
-        if status is not None:
-            status_text = str(status)
-            status_low = status_text.lower()
-            ok_status = (
-                "待发货" in status_text
-                or "待配送" in status_text
-                or "待出库" in status_text
-                or "wait_ship" in status_low
-                or "wait_deliver" in status_low
-                or "to_ship" in status_low
-            )
-            if not ok_status:
-                raise AssertionError(f"订单状态不是待发货：{status}")
-            logger.info("订单状态接口校验通过：%s", status)
+            try:
+                self.http.assert_order_wait_ship(order_no)
+            except MallOrderHttpError as exc:
+                raise AssertionError(str(exc)) from exc
+            logger.info("订单状态接口校验通过")
             return
         self.assert_page_contains_any(WAIT_SHIP_MARKERS, "页面未出现待发货/支付成功/订单详情", timeout=15.0)
         blob = self.page_blob()
