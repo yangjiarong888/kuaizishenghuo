@@ -11,9 +11,8 @@ import unicodedata
 from typing import Any, List, Optional, Sequence, Set, Tuple
 
 from appium.webdriver.common.appiumby import AppiumBy
-from selenium.common.exceptions import TimeoutException, WebDriverException
+from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support import expected_conditions as EC
 
 from commons.logger import setup_logger
 from pages.takeout_locators import (
@@ -2691,58 +2690,19 @@ class TakeoutCheckoutMixin(TakeoutDeliveryTimeMixin, TakeoutCancelOrderMixin):
         return False
     
 
-    def shop_enter_pay_password(self, password: str = "123456") -> bool:
-        time.sleep(0.5)
-        try:
-            self._wait(8).until(
-                EC.presence_of_element_located(
-                    (
-                        AppiumBy.XPATH,
-                        '//*[contains(@content-desc,"请输入支付密码") or contains(@text,"请输入支付密码")]',
-                    )
-                )
-            )
-        except TimeoutException:
-            # 须先于 WebDriverException：TimeoutException 是其子类，否则会被误捕获并 re-raise
-            logger.warning("未检测到支付密码弹窗标题，仍尝试点数字键")
-        except WebDriverException as ex:
-            if "instrumentation process is not running" in str(ex).lower():
-                logger.error("支付密码阶段失败：UiAutomator2 instrumentation 已崩溃")
-                return False
-            raise
-        for ch in password:
-            tapped = False
-            for xp in (
-                f'//android.view.View[@content-desc="{ch}"]',
-                f'//android.widget.TextView[@text="{ch}"]',
-                f'//android.widget.Button[@text="{ch}"]',
-            ):
-                if self._tap_first_displayed(AppiumBy.XPATH, xp):
-                    tapped = True
-                    time.sleep(0.18)
-                    break
-            if not tapped:
-                try:
-                    self.driver.find_element(
-                        AppiumBy.ANDROID_UIAUTOMATOR,
-                        f'new UiSelector().text("{ch}")',
-                    ).click()
-                    time.sleep(0.18)
-                except WebDriverException as ex:
-                    if "instrumentation process is not running" in str(ex).lower():
-                        logger.error("输入支付密码中断：UiAutomator2 instrumentation 已崩溃")
-                        return False
-                    logger.warning("未点到密码键「%s」: %s", ch, ex)
-                except Exception:
-                    logger.warning("未点到密码键「%s」", ch)
-        time.sleep(1.2)
-        return True
+    def shop_wait_for_manual_payment(self, timeout: float = 120.0) -> bool:
+        logger.warning(
+            "请在真机手动输入支付密码；脚本最多等待 %.0f 秒进入订单详情",
+            timeout,
+        )
+        return self.shop_assert_order_detail_cancel_visible(timeout=timeout)
     
 
     def run_shop_checkout_pay_and_cancel_flow(
         self,
-        pay_password: str = "123456",
         *,
+        submit_order: bool = False,
+        manual_payment_timeout: float = 120.0,
         category: Optional[str] = None,
         category_aliases: Optional[Sequence[str]] = None,
         delivery_prefer_scheduled: bool = False,
@@ -2757,8 +2717,9 @@ class TakeoutCheckoutMixin(TakeoutDeliveryTimeMixin, TakeoutCancelOrderMixin):
         merchant_remark: Optional[str] = DEFAULT_MERCHANT_REMARK,
     ) -> bool:
         """
-        ``checkout_payment``：``balance``（默认）选余额并输支付密码；
-        ``cod`` / 传 ``\"货到付款\"`` 选货到付款并跳过 ``shop_enter_pay_password``。
+        ``submit_order`` 默认为 ``False``，结算准备完成后停在最终确认前。
+        ``checkout_payment`` 为 ``balance`` 时由用户在真机手动输入支付密码；
+        ``cod`` / 传 ``\"货到付款\"`` 时跳过手动支付等待。
         ``coupon_policy``：外卖同时处理平台优惠券、商家优惠券；``auto`` 有可用就选，
         ``skip`` 跳过，``require`` 要求至少选中一类。
         备注默认会选择骑手/商家快捷备注，并输入 ``test order``。
@@ -2838,18 +2799,23 @@ class TakeoutCheckoutMixin(TakeoutDeliveryTimeMixin, TakeoutCancelOrderMixin):
             logger.error("未选到配送时段，终止支付流程")
             return False
         time.sleep(0.5)
+        if not submit_order:
+            logger.info("结算预览完成：未授权 --submit-order，停止在最终确认前")
+            return True
         if not self.shop_tap_confirm_pay_bar():
             logger.error("第二次「确认支付」未点到，终止支付流程")
             return False
         if pay_mode == "cod":
             time.sleep(1.0)
-            logger.info("货到付款：跳过输入支付密码")
-        else:
-            if not self.shop_enter_pay_password(pay_password):
-                logger.error("输入支付密码失败，终止流程")
+            logger.info("货到付款：跳过手动支付等待")
+            if not self.shop_assert_order_detail_cancel_visible():
                 return False
-        if not self.shop_assert_order_detail_cancel_visible():
-            return False
+        else:
+            if not self.shop_wait_for_manual_payment(
+                timeout=manual_payment_timeout
+            ):
+                logger.error("等待手动支付完成超时，未进入订单详情")
+                return False
         if not self.shop_cancel_order_flow():
             logger.error("取消流程失败：未提交成功或取消结果校验未通过")
             return False

@@ -11,7 +11,7 @@
   python scripts/run_takeout_wangwang.py --session my_session
   python scripts/run_takeout_wangwang.py --no-manila
   python scripts/run_takeout_wangwang.py --checkout
-  python scripts/run_takeout_wangwang.py --checkout --password 123456
+  python scripts/run_takeout_wangwang.py --checkout --submit-order
   python scripts/run_takeout_wangwang.py --checkout --category "健康粮油"
   python scripts/run_takeout_wangwang.py --checkout --delivery-time-slot-ordinal 5
   python scripts/run_takeout_wangwang.py --checkout --delivery-slot-contains 01:40
@@ -36,6 +36,7 @@ import argparse
 import os
 import sys
 from pathlib import Path
+from typing import Optional, Sequence
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
@@ -53,8 +54,8 @@ from pages.takeout_page import TakeoutPageBase, open_wangwang_supermarket_from_t
 logger = setup_logger(__name__)
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="外卖：旺旺店铺进店演示（takeout_page）")
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="外卖：旺旺店铺进店与安全结算预览")
     parser.add_argument(
         "--session",
         default="takeout_wangwang",
@@ -75,9 +76,9 @@ def main() -> int:
         ),
     )
     parser.add_argument(
-        "--password",
-        default="123456",
-        help="余额支付密码（默认 123456）",
+        "--submit-order",
+        action="store_true",
+        help="真实创建订单；必须与 --checkout 同时使用",
     )
     parser.add_argument(
         "--category",
@@ -165,7 +166,22 @@ def main() -> int:
         default=None,
         help="直接指定 START_MODE（优先级高于默认，低于 --cold）",
     )
-    args = parser.parse_args()
+    return parser
+
+
+def validate_args(args: argparse.Namespace) -> None:
+    if args.submit_order and not args.checkout:
+        raise ValueError("--submit-order requires --checkout")
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    try:
+        validate_args(args)
+    except ValueError as exc:
+        logger.error("参数安全校验失败: %s", exc)
+        return 2
 
     if args.cold:
         os.environ["START_MODE"] = "cold"
@@ -196,7 +212,7 @@ def main() -> int:
     if ok and args.checkout:
         page = TakeoutPageBase(driver)
         ok = page.run_shop_checkout_pay_and_cancel_flow(
-            pay_password=args.password,
+            submit_order=args.submit_order,
             category=args.category,
             category_aliases=args.category_alias or None,
             delivery_time_slot_ordinal=args.delivery_time_slot_ordinal,
@@ -210,10 +226,17 @@ def main() -> int:
             merchant_remark=args.merchant_remark,
         )
     if ok:
+        completed = ""
+        if args.checkout:
+            completed = (
+                "并完成真实下单/取消流程"
+                if args.submit_order
+                else "并完成结算预览（未提交订单）"
+            )
         logger.info(
             "流程结束：已尝试进店「%s」%s",
             args.shop,
-            "并完成下单/取消演示" if args.checkout else "",
+            completed,
         )
         return 0
     logger.error("流程失败，见上文日志")
