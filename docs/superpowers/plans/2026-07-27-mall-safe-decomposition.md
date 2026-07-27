@@ -751,7 +751,7 @@ if args.add_to_cart_only:
 & '..\Scripts\python.exe' -m pytest -m 'not device' -q
 ```
 
-- [ ] **Step 8: Commit Task 3**
+- [x] **Step 8: Commit Task 3**
 
 ```powershell
 git add -- pages/mall_order_cart_mixin.py scripts/run_mall_order_flow.py testcases/test_mall_order_cart.py
@@ -773,7 +773,7 @@ git commit -m "refactor: extract mall cart flow"
 - Consumes: common driver/click/type helpers and address configuration attributes on `MallOrderFlow`.
 - Produces: `MallOrderAddressMixin` with the complete existing address public surface.
 
-- [ ] **Step 1: Write a failing compatibility and read-only classification test**
+- [x] **Step 1: Write a failing compatibility and read-only classification test**
 
 ```python
 @pytest.mark.parametrize(
@@ -803,13 +803,13 @@ def test_target_address_labels_ignore_empty_values():
     assert page.target_address_labels() == ("Tester", "Manila")
 ```
 
-- [ ] **Step 2: Run address tests and verify RED**
+- [x] **Step 2: Run address tests and verify RED**
 
 ```powershell
 & '..\Scripts\python.exe' -m pytest testcases\test_mall_order_address.py -q
 ```
 
-- [ ] **Step 3: Move address constants and methods unchanged**
+- [x] **Step 3: Move address constants and methods unchanged**
 
 Move the address marker tuples and the exact method range from `visible_edit_texts()` through `ensure_test_address_from_my_page_flow()` into:
 
@@ -854,7 +854,7 @@ ensure_test_address_from_checkout_flow
 ensure_test_address_from_my_page_flow
 ```
 
-- [ ] **Step 4: Compose the mixin**
+- [x] **Step 4: Compose the mixin**
 
 ```python
 class MallOrderFlow(
@@ -867,7 +867,7 @@ class MallOrderFlow(
 
 Do not change CLI address capability validation or any locator during this task.
 
-- [ ] **Step 5: Run focused and full tests**
+- [x] **Step 5: Run focused and full tests**
 
 ```powershell
 & '..\Scripts\python.exe' -m pytest `
