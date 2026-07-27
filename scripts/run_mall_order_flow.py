@@ -554,7 +554,6 @@ class MallOrderFlow(
 
     # ---------- 预订时间 ----------
 
-    @staticmethod
     def search_goods(self, keyword: str) -> bool:
         """下单脚本专用搜索：禁用历史/热门搜索与活动浏览，直接搜索指定关键词。"""
         search_word = keyword.strip()

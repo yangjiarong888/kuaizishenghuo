@@ -1169,7 +1169,7 @@ send_im_after_order=args.send_order_im and not args.skip_order_im,
 & '..\Scripts\python.exe' -m pytest -m 'not device' -q
 ```
 
-- [ ] **Step 9: Commit Task 5**
+- [x] **Step 9: Commit Task 5**
 
 ```powershell
 git add -- pages/mall_order_checkout_mixin.py scripts/run_mall_order_flow.py testcases/test_mall_order_checkout.py
@@ -1189,7 +1189,7 @@ git commit -m "refactor: extract guarded mall checkout"
 - Consumes: completed CLI, facade, mixins, HTTP client, connected Android device, Appium 4723.
 - Produces: reproducible offline evidence, strict zero-business-data device evidence, residual-risk counts.
 
-- [ ] **Step 1: Run all focused and full offline tests**
+- [x] **Step 1: Run all focused and full offline tests**
 
 ```powershell
 $mallTests = Get-ChildItem testcases -Filter 'test_mall_order_*.py' |
@@ -1200,7 +1200,7 @@ $mallTests = Get-ChildItem testcases -Filter 'test_mall_order_*.py' |
 
 Record exact pass/fail/deselected counts.
 
-- [ ] **Step 2: Compile all Python sources in memory**
+- [x] **Step 2: Compile all Python sources in memory**
 
 ```powershell
 $compileCode = @'
@@ -1213,7 +1213,7 @@ print(f"compiled={len(files)}")
 & '..\Scripts\python.exe' -c $compileCode
 ```
 
-- [ ] **Step 3: Scan safety defaults and residual risks**
+- [x] **Step 3: Scan safety defaults and residual risks**
 
 ```powershell
 rg -n 'send_im_after_order=True|max_payable\\s*=\\s*[0-9]|allow_.*=True' pages flows scripts --glob '*.py'
@@ -1223,7 +1223,7 @@ rg -n 'except\\s+(Exception|BaseException)|except\\s*:' pages flows scripts/run_
 
 No fixed authorization defaults are allowed. Record wait and broad-exception counts rather than claiming they are all defects.
 
-- [ ] **Step 4: Reconfirm device and Appium**
+- [x] **Step 4: Reconfirm device and Appium**
 
 ```powershell
 & 'C:\Users\18718\AppData\Local\Android\Sdk\platform-tools\adb.exe' devices -l

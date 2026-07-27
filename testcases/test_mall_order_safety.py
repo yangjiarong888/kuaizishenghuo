@@ -256,3 +256,9 @@ def test_payable_above_explicit_limit_stops_before_submit():
     with pytest.raises(AssertionError, match="max-payable"):
         page.finish_checkout(product, submit_order=True)
     assert events == []
+
+
+def test_search_goods_remains_bound_after_checkout_extraction():
+    page = object.__new__(mall_cli.MallOrderFlow)
+
+    assert page.search_goods("") is False
