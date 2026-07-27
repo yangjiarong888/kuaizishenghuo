@@ -5,20 +5,18 @@
 """
 
 import time
-import os
-import subprocess
-from datetime import datetime
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from selenium.common.exceptions import WebDriverException
-from appium import webdriver
-from appium.webdriver.appium_connection import AppiumConnection
 from appium.webdriver.common.appiumby import AppiumBy
 
+from commons.diagnostics import capture_failure
+from commons.driver import DriverManager
 from .app_common import logger, AppConfig
 from .takeout_page import TakeoutPage
 from .shipping_page import ShippingPage
+from .transfer_page import TransferPage
 
 # ================ 核心测试类 ================
 class ChopsticksTester:
@@ -69,10 +67,14 @@ class ChopsticksTester:
         "美食外卖": "takeout",
         "海运": "shipping",
         "海运物流": "shipping",
+        "同城跑腿": "transfer",
+        "跑腿": "transfer",
     }
 
-    def __init__(self):
-        self.driver = None
+    def __init__(self, driver=None, session_name="home_comprehensive"):
+        self.driver = driver
+        self.session_name = session_name
+        self._owns_driver = driver is None
 
     def _wait(self, timeout=None):
         return WebDriverWait(self.driver, timeout or AppConfig.WAIT_TIMEOUT)
@@ -123,63 +125,16 @@ class ChopsticksTester:
     
     def setup_driver(self):
         """初始化Appium驱动"""
+        if self.driver is not None:
+            return True
         try:
             logger.info("🚀 启动Appium驱动...")
-            options = AppConfig.get_android_options()
-            app_package = os.environ.get("APP_PACKAGE", "com.bs.feifubao")
-            app_activity = os.environ.get("APP_ACTIVITY")
-            start_mode = os.environ.get("START_MODE", "cold").strip().lower()  # cold|activate
-            # 注意：此环境下 `//session` 会 404，所以 remote_server_addr 不要以 `/` 结尾
-            server_url = AppConfig.APPIUM_SERVER_URL.rstrip("/")
-            last_error = None
-            candidates = [server_url]
-            if os.environ.get("USE_WD_HUB", "false").strip().lower() in ("1", "true", "yes", "y"):
-                candidates.append(f"{server_url}/wd/hub")
-
-            for url in candidates:
-                try:
-                    conn = AppiumConnection(remote_server_addr=url)
-                    self.driver = webdriver.Remote(command_executor=conn, options=options)
-                    break
-                except Exception as e:
-                    last_error = e
-                    self.driver = None
-            if not self.driver:
-                raise last_error or RuntimeError("Failed to create Appium driver")
-            # 避免 implicit wait 叠加导致 find_elements 卡顿；统一用显式等待更稳定可控
-            self.driver.implicitly_wait(0)
-
-            # 启动策略（稳定性优先）：默认 cold 启动，尽量落在入口页/首页
-            if start_mode == "activate":
-                try:
-                    logger.info(f"启动模式=activate，激活 App: {app_package}")
-                    self.driver.activate_app(app_package)
-                except Exception as e:
-                    logger.debug(f"activate_app 失败，回退 cold 启动: {e}")
-                    start_mode = "cold"
-
-            if start_mode == "cold":
-                launch_activity = app_activity or AppConfig._detect_launchable_activity(app_package)
-                try:
-                    logger.info(f"启动模式=cold，终止并冷启动 App: {app_package}")
-                    try:
-                        self.driver.terminate_app(app_package)
-                    except Exception:
-                        pass
-                    if launch_activity:
-                        logger.info(f"start_activity: {app_package}/{launch_activity}")
-                        self.driver.start_activity(app_package, launch_activity)
-                    else:
-                        logger.warning("⚠️ 未解析到可启动 Activity，改用 activate_app")
-                        self.driver.activate_app(app_package)
-                except Exception as e:
-                    logger.debug(f"cold 启动失败，尝试 activate_app: {e}")
-                    self.driver.activate_app(app_package)
-
+            self.driver = DriverManager().get_driver(session_name=self.session_name)
             logger.info("✅ 驱动启动成功")
             return True
-        except Exception as e:
-            logger.error(f"❌ 驱动启动失败: {e}")
+        except Exception as exc:
+            self.driver = None
+            logger.error("❌ 驱动启动失败 error_type=%s", type(exc).__name__)
             return False
 
     def ensure_homepage(self, max_attempts=6):
@@ -682,6 +637,9 @@ class ChopsticksTester:
             elif biz_type == "shipping":
                 logger.info(f"🎯 入口 '{item_name}' 绑定业务：海运流程")
                 ShippingPage(self.driver).run_main_flow()
+            elif biz_type == "transfer":
+                logger.info(f"🎯 入口 '{item_name}' 绑定业务：同城跑腿安全菜单检查")
+                TransferPage(self.driver).verify_menu_round_trips()
             else:
                 logger.info(f"入口 '{item_name}' 暂未绑定具体业务流程，仅做可点击性验证")
 
@@ -820,26 +778,17 @@ class ChopsticksTester:
             logger.error(f"调试失败: {e}")
     
     def save_screenshot(self, name):
-        """保存截图"""
-        try:
-            os.makedirs(AppConfig.ARTIFACTS_DIR, exist_ok=True)
-            filename = os.path.join(
-                AppConfig.ARTIFACTS_DIR,
-                f"screenshot_{name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
-            )
-            self.driver.save_screenshot(filename)
-            logger.info(f"截图已保存: {filename}")
-        except Exception as e:
-            logger.warning(f"⚠️ 截图保存失败: {e}")
+        """保存脱敏失败证据并返回截图路径。"""
+        if self.driver is None:
+            return None
+        artifacts = capture_failure(self.driver, name, AppConfig.ARTIFACTS_DIR)
+        return artifacts.screenshot
     
     def cleanup(self):
         """清理资源"""
-        if self.driver:
-            try:
-                self.driver.quit()
-                logger.info("✅ 驱动已关闭")
-            except Exception as e:
-                logger.warning(f"⚠️ 关闭驱动时出错: {e}")
+        if self.driver is not None and self._owns_driver:
+            DriverManager().close_driver(self.session_name)
+            self.driver = None
     
     def run_comprehensive_test(self):
         """运行综合测试套件"""

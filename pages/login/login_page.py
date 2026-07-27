@@ -37,9 +37,18 @@ class LoginPage(
     _HOME_H5_TRAP_RES_ID_MARKERS = login_constants.HOME_H5_TRAP_RES_ID_MARKERS
     POST_LOGIN_VERIFY_WAIT_SEC: float = 5.0
 
-    def __init__(self, session_name: str = "login_test", data: Optional[LoginData] = None):
+    def __init__(
+        self,
+        session_name: str = "login_test",
+        data: Optional[LoginData] = None,
+        driver=None,
+    ):
         self.session_name = session_name
-        self.driver = DriverManager().get_driver(session_name=session_name)
+        self.driver = (
+            driver
+            if driver is not None
+            else DriverManager().get_driver(session_name=session_name)
+        )
         try:
             self.driver.implicitly_wait(0)
         except Exception:

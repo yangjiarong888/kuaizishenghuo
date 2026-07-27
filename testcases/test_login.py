@@ -8,6 +8,9 @@ from commons.driver import DriverManager
 from pages.login_page import LoginPage
 
 
+pytestmark = pytest.mark.device
+
+
 @allure.feature("登录功能测试")
 class TestLogin:
     @pytest.fixture(autouse=True)
