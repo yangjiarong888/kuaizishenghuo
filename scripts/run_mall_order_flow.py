@@ -42,7 +42,6 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -55,6 +54,13 @@ if str(ROOT) not in sys.path:
 
 from commons.driver import DriverManager
 from commons.logger import setup_logger
+from flows.mall_order_types import (
+    AmountSnapshot,
+    ProductSnapshot,
+    SubmitResult,
+    nearly_equal,
+    parse_money,
+)
 from pages.shop_business_page import ShopBusinessPage
 from pages.shop_locators import (
     SHOP_ID_COUNT_ADD,
@@ -140,11 +146,11 @@ COUPON_SHEET_MARKERS: Tuple[str, ...] = (
 DEFAULT_RIDER_REMARK = "请把餐品放到大楼前台 Please place the meal at the reception desk"
 DEFAULT_MERCHANT_REMARK = "如缺货，直接取消订单 Any product no stock, cancel order"
 DEFAULT_REMARK_TEXT = "test order"
-DEFAULT_ADDRESS_QUERY = "2515 Syquia, Santa Ana, Maynila, Kalakhang Maynila"
-DEFAULT_ADDRESS_NAME = "test"
-DEFAULT_ADDRESS_PHONE = "09621170994"
-DEFAULT_ADDRESS_WECHAT = "test"
-DEFAULT_ADDRESS_DETAIL = "2515 Syquia"
+DEFAULT_ADDRESS_QUERY = os.environ.get("MALL_TEST_ADDRESS_QUERY", "").strip()
+DEFAULT_ADDRESS_NAME = os.environ.get("MALL_TEST_ADDRESS_NAME", "").strip()
+DEFAULT_ADDRESS_PHONE = os.environ.get("MALL_TEST_ADDRESS_PHONE", "").strip()
+DEFAULT_ADDRESS_WECHAT = os.environ.get("MALL_TEST_ADDRESS_WECHAT", "").strip()
+DEFAULT_ADDRESS_DETAIL = os.environ.get("MALL_TEST_ADDRESS_DETAIL", "").strip()
 ADDRESS_LIST_MARKERS: Tuple[str, ...] = (
     "选择地址",
     "选择收货地址",
@@ -209,59 +215,6 @@ ADDRESS_ADD_LABELS: Tuple[str, ...] = (
     "新增收货地址",
     "+ 新增地址",
 )
-
-
-@dataclass
-class ProductSnapshot:
-    name: str
-    specs: Tuple[str, ...]
-    unit_price: float
-    quantity: int
-    sku: str
-    stock_before: Optional[int] = None
-
-
-@dataclass
-class AmountSnapshot:
-    goods_total: float
-    coupon: float
-    freight: float
-    payable: float
-
-
-@dataclass
-class SubmitResult:
-    order_no: str
-    cashier_amount: float
-
-
-def parse_money(raw: str) -> Optional[float]:
-    """解析常见金额：￥12.30 / ¥12.30 / P 12.30 / ₱12.30 / 12.30元。"""
-    if not raw:
-        return None
-    text = html.unescape(str(raw)).replace(",", "").strip()
-    if not text:
-        return None
-    has_money_hint = bool(
-        re.search(r"(￥|¥|₱|PHP|RMB|元|金额|价|费|付|合计|优惠|小计)", text, flags=re.I)
-    )
-    m = re.search(
-        r"(?P<neg>-)?\s*(?:￥|¥|₱|P|PHP|RMB)?\s*(?P<num>\d+(?:\.\d{1,2})?)\s*(?:元)?",
-        text,
-        flags=re.I,
-    )
-    if not m:
-        return None
-    if "." not in m.group("num") and not has_money_hint:
-        return None
-    val = float(m.group("num"))
-    if m.group("neg") or "优惠" in text or "减" in text:
-        return -val
-    return val
-
-
-def nearly_equal(left: float, right: float, tolerance: float = 0.02) -> bool:
-    return abs(left - right) <= tolerance
 
 
 class MallOrderFlow(ShopBusinessPage):
@@ -2903,6 +2856,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="只从「我的」页进入我的地址并新增/选择测试地址，不执行商城下单",
     )
     parser.add_argument(
+        "--allow-address-mutation",
+        action="store_true",
+        help="显式授权本次运行新增、编辑、复制或强制选择测试地址",
+    )
+    parser.add_argument(
         "--address-query",
         default=DEFAULT_ADDRESS_QUERY,
         help="地址搜索关键字",
@@ -2987,8 +2945,30 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main() -> int:
-    args = build_parser().parse_args()
+def validate_args(args) -> None:
+    """Reject address mutations unless this invocation explicitly allows them."""
+    mutation_requested = any(
+        (
+            args.ensure_test_address,
+            args.force_add_test_address,
+            args.edit_test_address,
+            args.copy_test_address,
+            args.add_test_address_only,
+        )
+    )
+    if mutation_requested and not args.allow_address_mutation:
+        raise ValueError(
+            "address mutation requires explicit --allow-address-mutation"
+        )
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    args = build_parser().parse_args(argv)
+    try:
+        validate_args(args)
+    except ValueError as exc:
+        logger.error("商城下单参数安全校验失败: %s", exc)
+        return 2
     specs = args.spec or ([] if args.product_source == "daily_baihuo" else ["黑色", "L"])
     expected_name_contains = (
         args.expected_name_contains
