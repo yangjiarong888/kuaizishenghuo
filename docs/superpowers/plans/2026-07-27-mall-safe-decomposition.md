@@ -33,11 +33,12 @@
 - Consumes: existing `build_parser()`, `validate_args(args)`, `main(argv=None)`, `MallOrderFlow`.
 - Produces: CLI flags `--verify-navigation-only`, `--allow-cart-mutation`, `--add-to-cart-only`, `--allow-order-creation`, `--max-payable`, `--cancel-created-order`, `--allow-order-cancellation`, `--send-order-im`, `--allow-order-message`; `MallOrderFlow.run_navigation_verification(keyword: str) -> bool`.
 
-- [ ] **Step 1: Write failing default and capability tests**
+- [x] **Step 1: Write failing default and capability tests**
 
 ```python
 def test_mall_safety_defaults_are_non_destructive():
     args = mall_cli.build_parser().parse_args([])
+    assert args.flow == "buy_now"
     assert args.verify_navigation_only is False
     assert args.allow_cart_mutation is False
     assert args.add_to_cart_only is False
@@ -91,7 +92,7 @@ def test_add_only_rejects_submit_order():
         mall_cli.validate_args(args)
 ```
 
-- [ ] **Step 2: Write failing cancellation, message, and navigation-only tests**
+- [x] **Step 2: Write failing cancellation, message, and navigation-only tests**
 
 ```python
 def test_order_cancellation_requires_creation_and_its_own_capability():
@@ -126,7 +127,7 @@ def test_navigation_only_rejects_mutating_or_exception_modes(extra):
         mall_cli.validate_args(args)
 ```
 
-- [ ] **Step 3: Prove invalid combinations fail before Driver creation**
+- [x] **Step 3: Prove invalid combinations fail before Driver creation**
 
 ```python
 def test_invalid_cart_mode_returns_two_before_driver(monkeypatch):
@@ -138,7 +139,7 @@ def test_invalid_cart_mode_returns_two_before_driver(monkeypatch):
     assert mall_cli.main(["--flow", "cart"]) == 2
 ```
 
-- [ ] **Step 4: Run the safety tests and verify RED**
+- [x] **Step 4: Run the safety tests and verify RED**
 
 ```powershell
 & '..\Scripts\python.exe' -m pytest testcases\test_mall_order_safety.py -q
@@ -146,7 +147,7 @@ def test_invalid_cart_mode_returns_two_before_driver(monkeypatch):
 
 Expected: failures for missing parser attributes and missing validation branches.
 
-- [ ] **Step 5: Add parser flags and validation**
+- [x] **Step 5: Add parser flags and validation**
 
 ```python
 parser.add_argument("--verify-navigation-only", action="store_true")
@@ -159,6 +160,10 @@ parser.add_argument("--allow-order-cancellation", action="store_true")
 parser.add_argument("--send-order-im", action="store_true")
 parser.add_argument("--allow-order-message", action="store_true")
 ```
+
+Also change the existing `--flow` default from `both` to `buy_now`.
+This keeps an argument-free invocation free of cart mutations; explicit
+`cart` and `both` selections remain capability-gated.
 
 Implement exact validation:
 
@@ -243,7 +248,7 @@ def validate_args(args) -> None:
             )
 ```
 
-- [ ] **Step 6: Write a failing navigation dispatch test**
+- [x] **Step 6: Write a failing navigation dispatch test**
 
 ```python
 def test_navigation_only_dispatches_no_mutating_flow(monkeypatch):
@@ -287,7 +292,7 @@ def install_fake_driver_boundaries(monkeypatch, flow_class):
     monkeypatch.setattr(mall_cli, "MallOrderFlow", flow_class)
 ```
 
-- [ ] **Step 7: Implement navigation-only behavior**
+- [x] **Step 7: Implement navigation-only behavior**
 
 ```python
 from commons.diagnostics import capture_failure
@@ -320,7 +325,7 @@ Pass safe constructor values:
 send_im_after_order=args.send_order_im and not args.skip_order_im
 ```
 
-- [ ] **Step 8: Run focused and full offline verification**
+- [x] **Step 8: Run focused and full offline verification**
 
 ```powershell
 & '..\Scripts\python.exe' -m pytest `

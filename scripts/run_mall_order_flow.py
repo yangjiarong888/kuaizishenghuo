@@ -53,6 +53,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from commons.driver import DriverManager
+from commons.diagnostics import capture_failure
 from commons.logger import setup_logger
 from flows.mall_order_types import (
     AmountSnapshot,
@@ -237,6 +238,7 @@ class MallOrderFlow(ShopBusinessPage):
         skip_stock_assert: bool,
         payment_method: str,
         min_order_amount: float,
+        max_payable: Optional[float],
         pick_preorder_time: bool,
         send_im_after_order: bool,
         im_message_template: str,
@@ -270,6 +272,7 @@ class MallOrderFlow(ShopBusinessPage):
         self.skip_stock_assert = skip_stock_assert
         self.payment_method = (payment_method or "cod").strip().lower()
         self.min_order_amount = float(min_order_amount or 0.0)
+        self.max_payable = max_payable
         self.pick_preorder_time = pick_preorder_time
         self.send_im_after_order = send_im_after_order
         self.im_message_template = im_message_template
@@ -2526,6 +2529,15 @@ class MallOrderFlow(ShopBusinessPage):
             raise AssertionError("当前页面不是商品详情页")
         return self.read_detail_snapshot()
 
+    def run_navigation_verification(self, keyword: str) -> bool:
+        """Read mall detail evidence and return without a business-data mutation."""
+        product = self.open_detail_and_snapshot(keyword)
+        if not product.name:
+            raise AssertionError("商品详情未读取到商品名称")
+        capture_failure(self.driver, "mall_navigation_verification")
+        self.safe_back_to_mall()
+        return True
+
     def open_daily_baihuo_detail_and_snapshot(self) -> ProductSnapshot:
         """日用百货分类选品入口，复用 ShopBusinessPage 中已验证的分类路径。"""
         if not self.ensure_mall_tab():
@@ -2635,6 +2647,13 @@ class MallOrderFlow(ShopBusinessPage):
         if not submit_order:
             logger.info("未传 --submit-order：停在确认订单页，跳过真实提交/支付/库存扣减")
             return
+        if self.max_payable is None or self.max_payable <= 0:
+            raise AssertionError("真实提交缺少正数 --max-payable")
+        if amounts.payable > self.max_payable:
+            raise AssertionError(
+                "确认页实付 %.2f 超过 --max-payable %.2f"
+                % (amounts.payable, self.max_payable)
+            )
         submit = self.submit_order(amounts)
         self.pay_and_assert(submit, product)
         self.send_order_cancel_im_if_needed(submit)
@@ -2748,7 +2767,22 @@ class MallOrderFlow(ShopBusinessPage):
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="商城下单：立即购买/购物车提交订单 E2E")
-    parser.add_argument("--flow", choices=("buy_now", "cart", "both"), default="both")
+    parser.add_argument("--flow", choices=("buy_now", "cart", "both"), default="buy_now")
+    parser.add_argument(
+        "--verify-navigation-only",
+        action="store_true",
+        help="只验证商城搜索、详情读取和安全返回，不改变业务数据",
+    )
+    parser.add_argument(
+        "--allow-cart-mutation",
+        action="store_true",
+        help="显式授权本次运行新增或删除购物车商品",
+    )
+    parser.add_argument(
+        "--add-to-cart-only",
+        action="store_true",
+        help="只加购并验证购物车商品，不进入结算",
+    )
     parser.add_argument(
         "--product-source",
         choices=("daily_baihuo", "search"),
@@ -2885,6 +2919,27 @@ def build_parser() -> argparse.ArgumentParser:
         help="真正点击提交订单，并继续收银台/货到付款或模拟支付/订单状态/库存扣减/IM 断言",
     )
     parser.add_argument(
+        "--allow-order-creation",
+        action="store_true",
+        help="显式授权本次运行创建真实订单",
+    )
+    parser.add_argument(
+        "--max-payable",
+        type=float,
+        default=None,
+        help="本次允许提交的最大实付金额；真实下单必须显式提供正数",
+    )
+    parser.add_argument(
+        "--cancel-created-order",
+        action="store_true",
+        help="订单验证完成后取消本次创建且已解析订单号的订单",
+    )
+    parser.add_argument(
+        "--allow-order-cancellation",
+        action="store_true",
+        help="显式授权取消本次创建的订单",
+    )
+    parser.add_argument(
         "--preorder-api-pattern",
         default=r"pre.?order|preOrder|createOrder|order/create|order/confirm|预订单",
         help="用于 logcat 匹配预订单接口调用的正则",
@@ -2920,6 +2975,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="提交并支付后跳过订单详情页联系商家的 IM 消息",
     )
     parser.add_argument(
+        "--send-order-im",
+        action="store_true",
+        help="订单验证后发送订单 IM；还需显式消息授权",
+    )
+    parser.add_argument(
+        "--allow-order-message",
+        action="store_true",
+        help="显式授权本次运行发送订单消息",
+    )
+    parser.add_argument(
         "--im-message-template",
         default="{order_no} 申请取消测试订单，谢谢",
         help="订单后发送给商家的消息模板，支持 {order_no}",
@@ -2946,8 +3011,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def validate_args(args) -> None:
-    """Reject address mutations unless this invocation explicitly allows them."""
-    mutation_requested = any(
+    """Reject unsafe or contradictory mall capabilities before Driver creation."""
+    address_mutation = any(
         (
             args.ensure_test_address,
             args.force_add_test_address,
@@ -2956,9 +3021,74 @@ def validate_args(args) -> None:
             args.add_test_address_only,
         )
     )
-    if mutation_requested and not args.allow_address_mutation:
+    if args.verify_navigation_only:
+        blocked = any(
+            (
+                args.submit_order,
+                args.allow_cart_mutation,
+                args.add_to_cart_only,
+                address_mutation,
+                args.run_cart_delete,
+                args.run_stockout,
+                args.run_network_exception,
+                args.send_order_im,
+                args.cancel_created_order,
+            )
+        )
+        if blocked:
+            raise ValueError(
+                "--verify-navigation-only conflicts with mutating or "
+                "exception-test options"
+            )
+
+    if address_mutation and not args.allow_address_mutation:
         raise ValueError(
             "address mutation requires explicit --allow-address-mutation"
+        )
+
+    cart_mutation = (
+        args.flow in ("cart", "both")
+        or args.add_to_cart_only
+        or args.run_cart_delete
+        or args.cart_delete_prepare_item
+    )
+    if cart_mutation and not args.allow_cart_mutation:
+        raise ValueError(
+            "cart mutation requires explicit --allow-cart-mutation"
+        )
+    if args.add_to_cart_only and args.submit_order:
+        raise ValueError(
+            "--add-to-cart-only conflicts with --submit-order"
+        )
+
+    if args.submit_order:
+        if not args.allow_order_creation:
+            raise ValueError(
+                "order creation requires explicit --allow-order-creation"
+            )
+        if args.max_payable is None or args.max_payable <= 0:
+            raise ValueError(
+                "order creation requires positive --max-payable"
+            )
+
+    if args.cancel_created_order and not (
+        args.submit_order and args.allow_order_cancellation
+    ):
+        raise ValueError(
+            "order cancellation requires --submit-order and "
+            "--allow-order-cancellation"
+        )
+
+    if args.send_order_im and not (
+        args.submit_order and args.allow_order_message
+    ):
+        raise ValueError(
+            "order message requires --submit-order and "
+            "--allow-order-message"
+        )
+    if args.send_order_im and args.skip_order_im:
+        raise ValueError(
+            "--send-order-im conflicts with --skip-order-im"
         )
 
 
@@ -3004,8 +3134,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         skip_stock_assert=args.skip_stock_assert,
         payment_method=args.payment_method,
         min_order_amount=args.min_order_amount,
+        max_payable=args.max_payable,
         pick_preorder_time=not args.skip_preorder_time,
-        send_im_after_order=not args.skip_order_im,
+        send_im_after_order=args.send_order_im and not args.skip_order_im,
         im_message_template=args.im_message_template,
         coupon_policy=args.coupon_policy,
         pickup_code=args.pickup_code,
@@ -3026,6 +3157,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     ok = False
     try:
+        if args.verify_navigation_only:
+            page.run_navigation_verification(args.keyword)
+            ok = True
+            return 0
         if args.add_test_address_only:
             page.ensure_test_address_from_my_page_flow(force_add=args.force_add_test_address)
             ok = True
