@@ -66,6 +66,7 @@ from flows.mall_order_types import (
 )
 from pages.mall_order_address_mixin import MallOrderAddressMixin
 from pages.mall_order_cart_mixin import MallOrderCartMixin
+from pages.mall_order_checkout_mixin import MallOrderCheckoutMixin
 from pages.shop_business_page import ShopBusinessPage
 from pages.shop_locators import (
     SHOP_ID_COUNT_ADD,
@@ -156,6 +157,7 @@ DEFAULT_ADDRESS_DETAIL = os.environ.get("MALL_TEST_ADDRESS_DETAIL", "").strip()
 class MallOrderFlow(
     MallOrderAddressMixin,
     MallOrderCartMixin,
+    MallOrderCheckoutMixin,
     ShopBusinessPage,
 ):
     """基于现有 ShopBusinessPage 补齐下单场景断言。"""
@@ -178,6 +180,7 @@ class MallOrderFlow(
         payment_method: str,
         min_order_amount: float,
         max_payable: Optional[float],
+        cancel_after_order: bool,
         pick_preorder_time: bool,
         send_im_after_order: bool,
         im_message_template: str,
@@ -212,6 +215,7 @@ class MallOrderFlow(
         self.payment_method = (payment_method or "cod").strip().lower()
         self.min_order_amount = float(min_order_amount or 0.0)
         self.max_payable = max_payable
+        self.cancel_after_order = cancel_after_order
         self.pick_preorder_time = pick_preorder_time
         self.send_im_after_order = send_im_after_order
         self.im_message_template = im_message_template
@@ -1585,38 +1589,6 @@ class MallOrderFlow(
         logger.info("立即购买路径：已跳转至订单确认页")
         return product
 
-    def finish_checkout(
-        self,
-        product: ProductSnapshot,
-        *,
-        submit_order: bool,
-    ) -> None:
-        self.dismiss_checkout_upsell_if_visible()
-        amounts = self.assert_checkout_matches_detail(product)
-        if self.ensure_test_address:
-            self.ensure_test_address_from_checkout_flow(force_add=self.force_add_test_address)
-            amounts = self.assert_checkout_matches_detail(product)
-        if self.apply_mall_platform_coupon_if_needed():
-            amounts = self.assert_checkout_matches_detail(product)
-        self.apply_checkout_preferences()
-        amounts = self.read_amounts(product)
-        selected_slot = self.pick_tomorrow_random_preorder_time_if_needed()
-        if selected_slot:
-            amounts = self.read_amounts(product)
-        if not submit_order:
-            logger.info("未传 --submit-order：停在确认订单页，跳过真实提交/支付/库存扣减")
-            return
-        if self.max_payable is None or self.max_payable <= 0:
-            raise AssertionError("真实提交缺少正数 --max-payable")
-        if amounts.payable > self.max_payable:
-            raise AssertionError(
-                "确认页实付 %.2f 超过 --max-payable %.2f"
-                % (amounts.payable, self.max_payable)
-            )
-        submit = self.submit_order(amounts)
-        self.pay_and_assert(submit, product)
-        self.send_order_cancel_im_if_needed(submit)
-
     def run_buy_now_flow(self, keyword: str, *, submit_order: bool) -> bool:
         logger.info("开始立即购买路径")
         product = self.open_detail_and_snapshot(keyword)
@@ -2086,6 +2058,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         payment_method=args.payment_method,
         min_order_amount=args.min_order_amount,
         max_payable=args.max_payable,
+        cancel_after_order=args.cancel_created_order,
         pick_preorder_time=not args.skip_preorder_time,
         send_im_after_order=args.send_order_im and not args.skip_order_im,
         im_message_template=args.im_message_template,
