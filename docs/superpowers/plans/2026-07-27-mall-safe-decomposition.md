@@ -574,7 +574,7 @@ def find_first_json_value(data, keys):
 & '..\Scripts\python.exe' -m pytest -m 'not device' -q
 ```
 
-- [ ] **Step 7: Commit Task 2**
+- [x] **Step 7: Commit Task 2**
 
 ```powershell
 git add -- flows/mall_order_http.py scripts/run_mall_order_flow.py testcases/test_mall_order_http.py
@@ -595,7 +595,7 @@ git commit -m "refactor: extract mall HTTP boundary"
 - Consumes: common click/read helpers on `MallOrderFlow`, `ProductSnapshot`, shop locator constants.
 - Produces: `MallOrderCartMixin`, existing cart public methods, `run_add_to_cart_only(keyword: str) -> bool`.
 
-- [ ] **Step 1: Write failing add-only behavior tests**
+- [x] **Step 1: Write failing add-only behavior tests**
 
 ```python
 class RecordingCart(MallOrderCartMixin):
@@ -631,7 +631,7 @@ def test_add_to_cart_only_stops_after_cart_assertion():
     ]
 ```
 
-- [ ] **Step 2: Write a failing compatibility surface test**
+- [x] **Step 2: Write a failing compatibility surface test**
 
 ```python
 @pytest.mark.parametrize(
@@ -650,7 +650,7 @@ def test_cart_mixin_keeps_public_methods(name):
     assert callable(getattr(MallOrderCartMixin, name))
 ```
 
-- [ ] **Step 3: Run cart tests and verify RED**
+- [x] **Step 3: Run cart tests and verify RED**
 
 ```powershell
 & '..\Scripts\python.exe' -m pytest testcases\test_mall_order_cart.py -q
@@ -658,7 +658,7 @@ def test_cart_mixin_keeps_public_methods(name):
 
 Expected: import failure for missing `pages.mall_order_cart_mixin`, then missing-method failures after an importable skeleton exists.
 
-- [ ] **Step 4: Move the exact cart method set unchanged**
+- [x] **Step 4: Move the exact cart method set unchanged**
 
 Create:
 
@@ -691,7 +691,7 @@ run_cart_flow
 
 Import the exact locator constants used by those bodies from `pages.shop_locators`.
 
-- [ ] **Step 5: Implement add-only helpers**
+- [x] **Step 5: Implement add-only helpers**
 
 ```python
 def add_product_to_cart_exact_specs(
@@ -726,7 +726,7 @@ def run_add_to_cart_only(self, keyword: str) -> bool:
 
 `assert_cart_contains_product()` opens the cart and requires the exact product name or configured expected-name fragment to be visible; it does not delete the item.
 
-- [ ] **Step 6: Compose the mixin and dispatch add-only**
+- [x] **Step 6: Compose the mixin and dispatch add-only**
 
 ```python
 class MallOrderFlow(MallOrderCartMixin, ShopBusinessPage):
@@ -742,7 +742,7 @@ if args.add_to_cart_only:
     return 0
 ```
 
-- [ ] **Step 7: Run focused and full tests**
+- [x] **Step 7: Run focused and full tests**
 
 ```powershell
 & '..\Scripts\python.exe' -m pytest `

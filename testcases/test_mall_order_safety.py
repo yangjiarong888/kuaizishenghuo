@@ -166,6 +166,32 @@ def test_navigation_only_dispatches_no_mutating_flow(monkeypatch):
     assert events == [("init", False), ("navigation", "可乐")]
 
 
+def test_add_only_dispatch_stops_before_checkout(monkeypatch):
+    events = []
+
+    class FakeFlow:
+        def __init__(self, driver, **kwargs):
+            events.append(("init", kwargs["send_im_after_order"]))
+
+        def run_add_to_cart_only(self, keyword):
+            events.append(("add-only", keyword))
+            return True
+
+    install_fake_driver_boundaries(monkeypatch, FakeFlow)
+
+    assert mall_cli.main(
+        [
+            "--add-to-cart-only",
+            "--allow-cart-mutation",
+            "--product-source",
+            "search",
+            "--keyword",
+            "可乐",
+        ]
+    ) == 0
+    assert events == [("init", False), ("add-only", "可乐")]
+
+
 def test_navigation_verification_reads_evidence_and_returns(monkeypatch):
     events = []
     page = object.__new__(mall_cli.MallOrderFlow)
