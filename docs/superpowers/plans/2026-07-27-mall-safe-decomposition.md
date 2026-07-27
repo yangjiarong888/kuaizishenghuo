@@ -877,7 +877,7 @@ Do not change CLI address capability validation or any locator during this task.
 & '..\Scripts\python.exe' -m pytest -m 'not device' -q
 ```
 
-- [ ] **Step 6: Commit Task 4**
+- [x] **Step 6: Commit Task 4**
 
 ```powershell
 git add -- pages/mall_order_address_mixin.py scripts/run_mall_order_flow.py testcases/test_mall_order_address.py
@@ -900,7 +900,7 @@ git commit -m "refactor: extract mall address flow"
 - Consumes: `ProductSnapshot`, `AmountSnapshot`, `SubmitResult`, `MallOrderHttpClient`, common driver helpers.
 - Produces: `MallOrderCheckoutMixin`, `assert_within_payable_limit(amounts: AmountSnapshot) -> None`, `cancel_created_order(submit: SubmitResult) -> None`, guarded `finish_checkout(...)`.
 
-- [ ] **Step 1: Write failing amount-ceiling tests**
+- [x] **Step 1: Write failing amount-ceiling tests**
 
 ```python
 class CheckoutRecorder(MallOrderCheckoutMixin):
@@ -951,7 +951,7 @@ def test_amount_above_ceiling_stops_before_submit(product):
     assert page.events == []
 ```
 
-- [ ] **Step 2: Write failing message-default and cancellation-order tests**
+- [x] **Step 2: Write failing message-default and cancellation-order tests**
 
 ```python
 def test_order_message_is_off_by_default(product):
@@ -986,13 +986,13 @@ def test_cancellation_stops_when_created_order_number_is_missing():
         page.cancel_created_order(submit)
 ```
 
-- [ ] **Step 3: Run checkout tests and verify RED**
+- [x] **Step 3: Run checkout tests and verify RED**
 
 ```powershell
 & '..\Scripts\python.exe' -m pytest testcases\test_mall_order_checkout.py -q
 ```
 
-- [ ] **Step 4: Move checkout constants and methods**
+- [x] **Step 4: Move checkout constants and methods**
 
 Create:
 
@@ -1052,7 +1052,7 @@ finish_checkout
 
 Network wrappers delegate to `self.http`; do not duplicate urllib logic.
 
-- [ ] **Step 5: Add the amount ceiling and explicit side effects**
+- [x] **Step 5: Add the amount ceiling and explicit side effects**
 
 ```python
 def assert_within_payable_limit(
@@ -1085,7 +1085,7 @@ if self.cancel_after_order:
     self.cancel_created_order(submit)
 ```
 
-- [ ] **Step 6: Implement explicit order cancellation**
+- [x] **Step 6: Implement explicit order cancellation**
 
 ```python
 def cancel_created_order(self, submit: SubmitResult) -> None:
@@ -1127,7 +1127,7 @@ def cancel_created_order(self, submit: SubmitResult) -> None:
 
 The method never retries order submission.
 
-- [ ] **Step 7: Compose the final facade and constructor fields**
+- [x] **Step 7: Compose the final facade and constructor fields**
 
 ```python
 class MallOrderFlow(
@@ -1155,7 +1155,7 @@ cancel_after_order=args.cancel_created_order,
 send_im_after_order=args.send_order_im and not args.skip_order_im,
 ```
 
-- [ ] **Step 8: Run focused and full tests**
+- [x] **Step 8: Run focused and full tests**
 
 ```powershell
 & '..\Scripts\python.exe' -m pytest `
