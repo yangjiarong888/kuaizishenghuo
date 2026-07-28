@@ -3,6 +3,10 @@ import inspect
 import pytest
 
 from pages.shop_business_search_mixin import MallBusinessSearchMixin
+from pages.shop_business_detail_mixin import (
+    MallBusinessDetailMixin,
+    parse_price_text,
+)
 
 
 pytestmark = pytest.mark.unit
@@ -106,3 +110,99 @@ def test_empty_search_stops_before_page_navigation():
 
     assert page.search_goods("  ") is False
     assert page.events == []
+
+
+DETAIL_METHODS = (
+    "_product_candidate_roots",
+    "_tap_first_search_result_image_by_source_bounds",
+    "_tap_first_search_grid_goods_by_source_bounds",
+    "open_first_visible_goods_detail",
+    "_category_goods_item_price",
+    "_tap_category_goods_item",
+    "_tap_first_category_goods_item",
+    "open_goods_detail",
+    "tap_detail_main_image",
+    "swipe_detail_to_content",
+    "tap_detail_activity_info_if_visible",
+    "tap_view_more_goods_if_visible",
+    "tap_detail_back_to_top",
+    "browse_goods_detail",
+    "open_and_browse_goods_detail",
+)
+
+
+@pytest.mark.parametrize("name", DETAIL_METHODS)
+def test_detail_mixin_keeps_method_surface(name):
+    assert callable(getattr(MallBusinessDetailMixin, name))
+
+
+class DetailRecorder(MallBusinessDetailMixin):
+    def __init__(
+        self,
+        *,
+        already_detail=False,
+        search_ok=True,
+        open_ok=True,
+    ):
+        self.already_detail = already_detail
+        self.search_ok = search_ok
+        self.open_ok = open_ok
+        self.events = []
+
+    def _is_mall_product_detail_visible(self):
+        self.events.append(("is-detail",))
+        return self.already_detail
+
+    def search_goods(self, keyword):
+        self.events.append(("search", keyword))
+        return self.search_ok
+
+    def ensure_mall_tab(self):
+        self.events.append(("mall-tab",))
+        return True
+
+    def open_first_visible_goods_detail(self):
+        self.events.append(("open-first",))
+        return self.open_ok
+
+
+def test_open_goods_detail_searches_before_opening_product():
+    page = DetailRecorder()
+
+    assert page.open_goods_detail("可乐") is True
+    assert page.events == [
+        ("is-detail",),
+        ("search", "可乐"),
+        ("open-first",),
+    ]
+
+
+def test_open_goods_detail_stops_when_search_fails():
+    page = DetailRecorder(search_ok=False)
+
+    assert page.open_goods_detail("可乐") is False
+    assert page.events == [
+        ("is-detail",),
+        ("search", "可乐"),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("₱33.00", 33.0),
+        ("P 12.5", 12.5),
+        ("20", None),
+        ("", None),
+    ],
+)
+def test_detail_price_parser_keeps_behavior(raw, expected):
+    assert parse_price_text(raw) == expected
+
+
+def test_facade_reexports_price_parser():
+    from pages.shop_business_page import (
+        parse_price_text as facade_parse_price_text,
+    )
+
+    assert facade_parse_price_text("₱33.00") == 33.0
