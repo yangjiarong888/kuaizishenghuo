@@ -61,3 +61,59 @@ def test_strict_mall_tab_navigation_fails_without_coordinate_fallback(monkeypatc
 
     assert page.ensure_mall_tab(settle=0) is False
     assert coordinate_attempts == []
+
+
+class ClickFailingTab:
+    def __init__(self, x):
+        self.location = {"x": x, "y": 2200}
+        self.size = {"width": 120, "height": 120}
+
+    def get_attribute(self, name):
+        return "true" if name == "clickable" else ""
+
+    def click(self):
+        raise RuntimeError("semantic click failed")
+
+
+class StructuralFallbackDriver(EmptyHomeDriver):
+    def __init__(self):
+        super().__init__()
+        self.execute_scripts = []
+        self._tabs = [ClickFailingTab(x) for x in (100, 400, 700)]
+
+    def find_elements(self, by, value):
+        self.find_calls.append((by, value))
+        return self._tabs if "ll_tab_content" in value else []
+
+    def execute_script(self, name, args):
+        self.execute_scripts.append((name, args))
+
+
+def test_strict_structural_mall_tab_click_failure_never_uses_coordinates(monkeypatch):
+    driver = StructuralFallbackDriver()
+    page = ShopHomePage(driver)
+    page._mall_tab_coordinate_fallback_disabled = True
+    adb_attempts = []
+    monkeypatch.setattr(shop_home_page.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        page,
+        "_adb_tap",
+        lambda *args, **kwargs: adb_attempts.append((args, kwargs)) or True,
+    )
+
+    assert page._tap_mall_bottom_tab_by_structure(settle=0) is False
+    assert driver.execute_scripts == []
+    assert adb_attempts == []
+
+
+def test_default_structural_mall_tab_click_failure_keeps_coordinate_fallback(
+    monkeypatch,
+):
+    driver = StructuralFallbackDriver()
+    page = ShopHomePage(driver)
+    monkeypatch.setattr(shop_home_page.time, "sleep", lambda _seconds: None)
+
+    assert page._tap_mall_bottom_tab_by_structure(settle=0) is True
+    assert driver.execute_scripts == [
+        ("mobile: clickGesture", {"x": 760, "y": 2260})
+    ]

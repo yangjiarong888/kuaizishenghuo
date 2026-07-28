@@ -843,6 +843,8 @@ class ShopHomePage:
             time.sleep(settle)
             return True
         except Exception:
+            if getattr(self, "_mall_tab_coordinate_fallback_disabled", False):
+                return False
             try:
                 loc = el.location
                 size = el.size
