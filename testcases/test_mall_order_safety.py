@@ -222,6 +222,42 @@ def test_navigation_verification_reads_evidence_and_returns(monkeypatch):
     ]
 
 
+@pytest.mark.parametrize("raise_during_detail", [False, True])
+def test_navigation_verification_disables_mall_tab_coordinate_fallback_and_restores_it(
+    monkeypatch, raise_during_detail
+):
+    """Strict navigation keeps the mall-tab fallback disabled during detail opening."""
+    page = object.__new__(mall_cli.MallOrderFlow)
+    page.driver = object()
+    page._mall_tab_coordinate_fallback_disabled = False
+    observed = []
+
+    def open_detail_and_snapshot(keyword):
+        observed.append((keyword, page._mall_tab_coordinate_fallback_disabled))
+        if raise_during_detail:
+            raise RuntimeError("detail opening failed")
+        return ProductSnapshot(
+            name="可乐",
+            specs=(),
+            unit_price=10.0,
+            quantity=1,
+            sku="SKU-1",
+        )
+
+    page.open_detail_and_snapshot = open_detail_and_snapshot
+    page.safe_back_to_mall = lambda: None
+    monkeypatch.setattr(mall_cli, "capture_failure", lambda *_args: None)
+
+    if raise_during_detail:
+        with pytest.raises(RuntimeError, match="detail opening failed"):
+            page.run_navigation_verification("可乐")
+    else:
+        assert page.run_navigation_verification("可乐") is True
+
+    assert observed == [("可乐", True)]
+    assert page._mall_tab_coordinate_fallback_disabled is False
+
+
 def test_payable_above_explicit_limit_stops_before_submit():
     events = []
     page = object.__new__(mall_cli.MallOrderFlow)

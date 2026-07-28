@@ -586,12 +586,21 @@ class MallOrderFlow(
 
     def run_navigation_verification(self, keyword: str) -> bool:
         """Read mall detail evidence and return without a business-data mutation."""
-        product = self.open_detail_and_snapshot(keyword)
-        if not product.name:
-            raise AssertionError("商品详情未读取到商品名称")
-        capture_failure(self.driver, "mall_navigation_verification")
-        self.safe_back_to_mall()
-        return True
+        previous_coordinate_fallback_disabled = getattr(
+            self, "_mall_tab_coordinate_fallback_disabled", False
+        )
+        self._mall_tab_coordinate_fallback_disabled = True
+        try:
+            product = self.open_detail_and_snapshot(keyword)
+            if not product.name:
+                raise AssertionError("商品详情未读取到商品名称")
+            capture_failure(self.driver, "mall_navigation_verification")
+            self.safe_back_to_mall()
+            return True
+        finally:
+            self._mall_tab_coordinate_fallback_disabled = (
+                previous_coordinate_fallback_disabled
+            )
 
     def open_daily_baihuo_detail_and_snapshot(self) -> ProductSnapshot:
         """日用百货分类选品入口，复用 ShopBusinessPage 中已验证的分类路径。"""

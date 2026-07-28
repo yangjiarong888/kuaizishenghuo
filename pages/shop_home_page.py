@@ -60,6 +60,7 @@ class ShopHomePage:
     def __init__(self, driver: WebDriver, wait_sec: float = 18.0):
         self.driver = driver
         self.wait_sec = wait_sec
+        self._mall_tab_coordinate_fallback_disabled = False
         self._mall_ctx = ShopMallContext(driver)
         self._badge = MallCartBadgeReader(self._mall_ctx)
         self._spec = MallSpecSheet(
@@ -178,7 +179,10 @@ class ShopHomePage:
     def ensure_mall_tab(self, settle: float = 1.2) -> bool:
         """点击底部「商城」Tab（与外卖 Tab 同类 resource-id 结构）。"""
         self.close_home_activity_popup_if_visible()
-        if self._tap_mall_bottom_tab_by_coordinate():
+        if (
+            not self._mall_tab_coordinate_fallback_disabled
+            and self._tap_mall_bottom_tab_by_coordinate()
+        ):
             logger.info("已点击底部「商城」Tab（坐标优先）")
             time.sleep(settle)
             return True
@@ -223,7 +227,10 @@ class ShopHomePage:
                     continue
         except Exception:
             pass
-        if self._tap_mall_bottom_tab_by_coordinate():
+        if (
+            not self._mall_tab_coordinate_fallback_disabled
+            and self._tap_mall_bottom_tab_by_coordinate()
+        ):
             logger.info("已点击底部「商城」Tab（坐标兜底）")
             time.sleep(settle)
             return True
