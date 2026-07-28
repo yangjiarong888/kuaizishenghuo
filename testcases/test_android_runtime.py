@@ -46,6 +46,19 @@ class RecordingDriver:
         self.calls.append(("activate", package))
 
 
+class ModernRecordingDriver:
+    """Appium Python Client 5 no longer exposes start_activity()."""
+
+    def __init__(self):
+        self.calls = []
+
+    def terminate_app(self, package):
+        self.calls.append(("terminate", package))
+
+    def execute_script(self, script, arguments):
+        self.calls.append(("execute", script, arguments))
+
+
 def test_post_session_launch_cold_terminates_then_starts():
     from commons.android_runtime import post_session_android_launch
     from commons.config import AppConfig
@@ -61,6 +74,31 @@ def test_post_session_launch_cold_terminates_then_starts():
             "start",
             "com.bs.feifubao",
             "com.bs.feifubao.activity.MainActivity",
+        ),
+    ]
+
+
+def test_post_session_launch_cold_supports_modern_appium_driver():
+    from commons.android_runtime import post_session_android_launch
+    from commons.config import AppConfig
+
+    driver = ModernRecordingDriver()
+
+    mode = post_session_android_launch(driver, AppConfig(), start_mode="cold")
+
+    assert mode == "cold"
+    assert driver.calls == [
+        ("terminate", "com.bs.feifubao"),
+        (
+            "execute",
+            "mobile: startActivity",
+            {
+                "intent": (
+                    "com.bs.feifubao/"
+                    "com.bs.feifubao.activity.MainActivity"
+                ),
+                "wait": True,
+            },
         ),
     ]
 

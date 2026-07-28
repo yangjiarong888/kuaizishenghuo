@@ -13,6 +13,20 @@ from commons.logger import setup_logger
 logger = setup_logger(__name__)
 
 
+def _start_android_activity(driver, app_package: str, app_activity: str) -> None:
+    legacy_start = getattr(driver, "start_activity", None)
+    if callable(legacy_start):
+        legacy_start(app_package, app_activity)
+        return
+    driver.execute_script(
+        "mobile: startActivity",
+        {
+            "intent": f"{app_package}/{app_activity}",
+            "wait": True,
+        },
+    )
+
+
 def detect_first_adb_device_id(
     run: Callable[..., Any] = subprocess.run,
 ) -> str | None:
@@ -86,11 +100,11 @@ def post_session_android_launch(driver, config, start_mode=None) -> str:
     except Exception as exc:
         logger.debug("terminate_app failed error_type=%s", type(exc).__name__)
     if config.app_activity:
-        driver.start_activity(config.app_package, config.app_activity)
+        _start_android_activity(driver, config.app_package, config.app_activity)
     else:
         activity = detect_launchable_activity(config.app_package)
         if activity:
-            driver.start_activity(config.app_package, activity)
+            _start_android_activity(driver, config.app_package, activity)
         else:
             driver.activate_app(config.app_package)
     return "cold"

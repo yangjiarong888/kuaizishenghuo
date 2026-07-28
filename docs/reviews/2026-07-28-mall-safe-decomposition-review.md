@@ -11,7 +11,7 @@
 ## 离线验证
 
 - 商城聚焦测试：`86 passed`
-- 全量非真机测试：`219 passed, 1 deselected`
+- 全量非真机测试：`220 passed, 1 deselected`
 - Python 内存编译：`compiled=93`
 - `scripts/run_mall_order_flow.py`：基线 `3077` 行，当前 `1193` 行
 - 授权默认值扫描：未发现商城业务能力被固定为开启；唯一命中 `allow_slow_legacy_xpath=True` 是外卖页面的定位策略开关，不是业务写入授权
@@ -60,6 +60,12 @@ $tests = @(Get-ChildItem testcases -Filter 'test_mall_order_*.py' |
 截图和 XML 均显示商品详情页。XML 中密码类属性已脱敏，未观察到手机号或验证码泄露。日志只包含导航、搜索、详情读取和返回动作；没有出现加购、提交订单、支付、地址增删改、订单消息或取消订单动作。运行结束后 Driver 正常关闭，前台回到主 Activity。
 
 验证期间还修复了首页无弹窗时的慢查询：旧实现会重复 8 轮、共 88 次探测；现在页面源码明确不存在关闭控件时不再发元素查询，确实关闭一层弹窗后才继续探测下一层。回归测试覆盖了该行为。
+
+完成前的无筛选测试还暴露出 Appium Python Client `5.2.7` 已移除
+`WebDriver.start_activity`。运行时边界现保留旧客户端调用，并在新客户端走
+`mobile: startActivity`。独立冷启动真机会话成功进入 `.activity.MainActivity`
+并正常关闭 Driver；该探针没有点击任何页面元素。证据为
+`logs/20260728_120459_395873_cold_start_compat_probe.png` 和对应 XML。
 
 ## 未经真机验证的范围
 
