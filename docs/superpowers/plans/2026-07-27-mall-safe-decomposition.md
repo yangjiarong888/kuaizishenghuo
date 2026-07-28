@@ -1182,7 +1182,7 @@ git commit -m "refactor: extract guarded mall checkout"
 ### Task 6: Static Verification, Read-Only Device Run, and Review Report
 
 **Files:**
-- Create: `docs/reviews/2026-07-27-mall-safe-decomposition-review.md`
+- Create: `docs/reviews/2026-07-28-mall-safe-decomposition-review.md`
 - Verify: all Task 1-5 source and test files.
 
 **Interfaces:**
@@ -1232,7 +1232,7 @@ Invoke-RestMethod -Uri 'http://127.0.0.1:4723/status'
 
 Expected: device `P7T4XC99CYAEYL4H` is `device`; Appium reports `ready: true`.
 
-- [ ] **Step 5: Run only the strict navigation mode on the device**
+- [x] **Step 5: Run only the strict navigation mode on the device**
 
 ```powershell
 & '..\Scripts\python.exe' scripts\run_mall_order_flow.py `
@@ -1246,7 +1246,7 @@ Expected: device `P7T4XC99CYAEYL4H` is `device`; Appium reports `ready: true`.
 
 Forbidden in this command: `--allow-cart-mutation`, `--submit-order`, address flags, `--run-cart-delete`, `--run-stockout`, `--run-network-exception`, message flags, or cancellation flags.
 
-- [ ] **Step 6: Inspect evidence and device state**
+- [x] **Step 6: Inspect evidence and device state**
 
 Verify:
 
@@ -1258,7 +1258,7 @@ Verify:
 
 Do not infer checkout, address, cart, payment, or cancellation compatibility from this run.
 
-- [ ] **Step 7: Write the review report**
+- [x] **Step 7: Write the review report**
 
 The report must include:
 
@@ -1270,7 +1270,7 @@ The report must include:
 - sections marked not device-verified;
 - the exact capability set required for future add-only and real-order runs.
 
-- [ ] **Step 8: Commit the report**
+- [x] **Step 8: Commit the report**
 
 ```powershell
 git add -- docs/reviews/2026-07-27-mall-safe-decomposition-review.md
