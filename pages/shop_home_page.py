@@ -92,6 +92,19 @@ class ShopHomePage:
         """关闭首页活动/广告弹窗，避免遮挡底部「商城」Tab。"""
         closed = False
         w, h = self._window_size()
+        try:
+            source = self.driver.page_source or ""
+        except Exception:
+            source = ""
+        popup_markers = (
+            'content-desc="关闭"',
+            'text="关闭"',
+            'text="跳过"',
+            "iv_close",
+            "btn_close",
+        )
+        if source and not any(marker in source for marker in popup_markers):
+            return False
         text_xpaths = (
             '//*[@content-desc="关闭"]',
             '//*[@text="关闭"]',
@@ -157,7 +170,7 @@ class ShopHomePage:
                     if hit:
                         break
                 if not hit:
-                    time.sleep(0.35)
+                    break
         if closed:
             time.sleep(0.4)
         return closed
