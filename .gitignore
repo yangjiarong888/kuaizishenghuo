@@ -175,6 +175,9 @@ current_*.xml
 current_order.png
 shop_*_current.xml
 
+# Local isolated Git worktrees
+.worktrees/
+
 # PyPI configuration file
 .pypirc
 
