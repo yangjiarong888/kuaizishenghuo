@@ -98,6 +98,9 @@
 该 mixin 通过门面的 MRO 使用 `search_goods()` 和通用交互方法，不导入搜索
 mixin，也不形成继承链。
 
+模块级价格解析函数 `parse_price_text(raw: str) -> Optional[float]` 同步迁移到
+详情 mixin 模块，因为 `_category_goods_item_price()` 直接依赖它。
+
 ### `pages/shop_business_page.py`
 
 修改为：
@@ -120,13 +123,15 @@ class ShopBusinessPage(
 - 立即购买、提交订单和完整业务流编排
 
 公共调用方仍只需要实例化 `ShopBusinessPage`。本轮不要求调用方直接实例化
-两个 mixin。
+两个 mixin。`pages.shop_business_page` 继续重导出 `parse_price_text`，保留潜在
+历史导入兼容。
 
 ### `testcases/test_shop_business_decomposition.py`
 
 新增离线单元测试，覆盖：
 
 - `ShopBusinessPage` 上搜索与详情公共方法仍可调用。
+- `pages.shop_business_page.parse_price_text` 仍可导入且解析结果不变。
 - `search_goods()` 保持实例方法绑定，防止再次出现 stray `@staticmethod`。
 - `open_goods_detail(keyword)` 仍先执行搜索，再选择商品，并要求详情页判定成功。
 - 搜索失败时不尝试点击商品。
