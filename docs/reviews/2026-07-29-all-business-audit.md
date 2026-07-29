@@ -57,18 +57,18 @@ a63e281 fix: guard mall structural fallback
 | 外卖 | `pages/takeout_*`、`scripts/run_takeout_wangwang.py` | `test_takeout_cli.py`（CLI 组合）；`test_takeout_checkout_boundary.py`（结算/提交边界） | `2026-07-27-takeout-safe-checkout-review.md` | 见第 5 节；均未开始/未执行。 |
 | 跑腿 | `pages/transfer_page.py`、`scripts/run_transfer_business.py` | `test_transfer_page.py`（页面）；`test_transfer_cli.py`（CLI） | `2026-07-27-transfer-charge-review.md` | 见第 5 节；均未开始/未执行。 |
 | 充值 | `pages/charge_page.py` | `test_charge_page.py`（页面/提交边界） | `2026-07-27-transfer-charge-review.md` | 见第 5 节；均未开始/未执行。 |
-| 配送辅助 | `pages/shipping_page.py` | 无独立 `test_shipping_*.py`；调用方、活跃入口和覆盖关系待复核。 | 无独立报告 | 见第 5 节；均未开始/未执行。 |
+| 配送辅助 | `pages/shipping_page.py` | 未发现匹配 `test_shipping_*.py` 的文件；调用方、活跃入口和覆盖关系待复核。 | 无独立报告 | 见第 5 节；均未开始/未执行。 |
 
 测试文件总数为 **24**。上表将每个 `testcases/test_*.py` 文件映射到一个生产区域；“无独立测试”是覆盖缺口，不是生产缺陷结论。
 
 ## 4. 当前全局风险计数（去重文件）
 
-扫描根为 `commons/`、`pages/`、`flows/`、`scripts/`，即上述 69 个唯一生产文件。方法刻意不使用 `Get-Content | Measure-Object`：它可能把空文件处理为没有对象。每个文件使用 .NET `ReadAllText` 读取；空文件显式计为 0 行，非空文件按 `\r\n|\r|\n` 分隔符数加一计算物理行。BOM 不影响计数。
+扫描根为 `commons/`、`pages/`、`flows/`、`scripts/`，即上述 69 个唯一生产文件。方法刻意不使用 `Get-Content | Measure-Object`：它可能把空文件处理为没有对象。每个文件使用 .NET `ReadAllText` 读取：空文件计为 0 行；所有文件先计 `\r\n|\r|\n` 换行分隔符；仅当文件非空且内容不以换行结尾时再加 1。BOM 不影响计数。
 
 | 指标 | 当前值 | 精确定义 |
 | --- | ---: | --- |
 | 唯一生产 Python 文件 | 69 | 一次递归枚举后排序，按完整路径去重。 |
-| 物理行 | 23,731 | 上述空文件安全的换行计数方法。 |
+| 物理行 | 23,666 | 上述空文件安全的换行计数方法。 |
 | 固定等待 | 524 | 正则 `(?m)\btime\.sleep\s*\(` 的全部匹配。 |
 | 宽泛异常 | 735 | 正则 `(?m)^\s*except\s*(?:Exception(?:\s+as\s+\w+)?\s*)?:\s*(?:#.*)?$` 的 `except Exception`（可带 `as`）及 bare `except:`。 |
 | 超过 800 物理行的文件 | 10 | 按单个去重生产文件的物理行数，严格大于 800。 |
@@ -77,16 +77,16 @@ a63e281 fix: guard mall structural fallback
 
 | 物理行 | 文件 |
 | ---: | --- |
-| 2,824 | `pages/takeout_checkout_mixin.py` |
-| 2,487 | `pages/login/mixins/oauth_mixin.py` |
-| 1,309 | `pages/shop_home_page.py` |
-| 1,207 | `scripts/run_mall_order_flow.py` |
-| 1,086 | `pages/takeout_page.py` |
-| 1,086 | `pages/takeout_cancel_order_mixin.py` |
-| 1,068 | `pages/mall_order_checkout_mixin.py` |
-| 986 | `pages/login/mixins/find_click_mixin.py` |
-| 911 | `pages/login/mixins/navigation_postlogin_mixin.py` |
-| 874 | `pages/Home.py` |
+| 2,823 | `pages/takeout_checkout_mixin.py` |
+| 2,486 | `pages/login/mixins/oauth_mixin.py` |
+| 1,308 | `pages/shop_home_page.py` |
+| 1,206 | `scripts/run_mall_order_flow.py` |
+| 1,085 | `pages/takeout_page.py` |
+| 1,085 | `pages/takeout_cancel_order_mixin.py` |
+| 1,067 | `pages/mall_order_checkout_mixin.py` |
+| 985 | `pages/login/mixins/find_click_mixin.py` |
+| 910 | `pages/login/mixins/navigation_postlogin_mixin.py` |
+| 873 | `pages/Home.py` |
 
 空文件（明确计入文件总数、计为 0 行）：`commons/__init__.py`、`commons/base_page.py`、`scripts/__init__.py`。域之间可能共享调用链，故域小计不得用于重算本节全局值。
 
