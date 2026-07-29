@@ -50,7 +50,7 @@ a63e281 fix: guard mall structural fallback
 
 | 域 | 主要入口/生产区 | 当前测试文件（映射的生产区） | 历史报告 | 当前审查层状态 |
 | --- | --- | --- | --- | --- |
-| 公共基础 | `commons/*.py` | `test_android_runtime.py`（Android runtime）；`test_config.py`（配置）；`test_diagnostics.py`（诊断）；`test_driver.py`（Driver）；`test_logger.py`（日志）；`test_waits.py`（等待） | `2026-07-22-foundation-review.md` | 见第 5 节；均未开始/未执行。 |
+| 公共基础 | `commons/*.py` | `test_android_runtime.py`（Android runtime）；`test_config.py`（配置）；`test_diagnostics.py`（诊断）；`test_driver.py`（Driver）；`test_logger.py`（日志）；`test_waits.py`（等待） | `2026-07-22-foundation-review.md` | Task 2 已完成静态审查并执行聚焦离线测试；证据与发现见第 9 节。 |
 | 登录与首页 | `pages/Home.py`、`pages/app_common.py`、`pages/login*`、`scripts/main.py`、`scripts/run_login.py`、`scripts/password_login_standalone.py`、`scripts/smoke_test.py` | `test_home.py`（首页）；`test_login.py`、`test_login_page_unit.py`（登录）；`test_main_cli.py`（主 CLI） | `2026-07-22-login-home-review.md` | 见第 5 节；均未开始/未执行。 |
 | 商城只读浏览 | `pages/shop_*`、`flows/shop_home_*`、`scripts/run_shop_home.py`、`scripts/run_shop_business.py` | `test_shop_home_navigation.py`（商城导航/严格模式）；`test_shop_business_decomposition.py`（搜索/详情拆分门面） | `2026-07-28-mall-safe-decomposition-review.md`；`2026-07-28-shop-business-readonly-decomposition-review.md` | 见第 5 节；均未开始/未执行。 |
 | 商城订单边界 | `pages/mall_order_*`、`flows/mall_order_*`、`scripts/run_mall_order_flow.py` | `test_mall_order_address.py`（地址）；`test_mall_order_cart.py`（购物车）；`test_mall_order_checkout.py`（结算）；`test_mall_order_cli.py`（CLI/能力）；`test_mall_order_http.py`（HTTP）；`test_mall_order_safety.py`（安全边界）；`test_mall_order_types.py`（类型/金额） | `2026-07-22-mall-order-boundary-review.md`；`2026-07-28-mall-safe-decomposition-review.md` | 见第 5 节；均未开始/未执行。 |
@@ -96,7 +96,7 @@ a63e281 fix: guard mall structural fallback
 
 | 域 | 静态审查 | 离线验证 | 真机无副作用 | 真实写入 |
 | --- | --- | --- | --- | --- |
-| 公共基础 | 未开始 | 未开始 | 未执行 | 未授权未执行 |
+| 公共基础 | 已完成（含 3 个确认缺陷、3 个风险） | 已通过（21 passed） | 未执行 | 未授权未执行 |
 | 登录与首页 | 未开始 | 未开始 | 未执行 | 未授权未执行 |
 | 商城只读浏览 | 未开始 | 未开始 | 未执行 | 未授权未执行 |
 | 商城订单边界 | 未开始 | 未开始 | 未执行 | 未授权未执行 |
@@ -105,7 +105,7 @@ a63e281 fix: guard mall structural fallback
 | 充值 | 未开始 | 未开始 | 未执行 | 未授权未执行 |
 | 配送辅助 | 未开始 | 未开始 | 未执行 | 未授权未执行 |
 
-特别说明：**没有任何业务域在本报告中被标记为“静态审查完成”。** 历史离线计数仅为审查线索；Task 9 的新鲜全量非真机回归才是当前树的最终离线结论。
+特别说明：公共基础的 Task 2 静态审查与聚焦离线测试已完成，证据见第 9 节；其余业务域尚未完成静态审查。历史离线计数仅为审查线索；Task 9 的新鲜全量非真机回归才是当前树的最终离线结论。
 
 ## 6. 历史证据继承与增量复审边界
 
@@ -135,3 +135,51 @@ a63e281 fix: guard mall structural fallback
 ## 8. 后续更新约定
 
 后续任务仅在完成相应域的静态审查、离线验证或获授权的安全设备验证后，更新第 5 节的单一状态值，并在本报告增加可复核的命令、输出、文件行号和证据边界。真实写入在获得单独、明确授权前始终保持“未授权未执行”。
+
+## 9. Task 2：公共基础层、配置、Driver、等待与诊断审查
+
+### 范围、基线与方法
+
+- 审查对象：`commons/android_runtime.py`、`commons/config.py`、`commons/diagnostics.py`、`commons/driver.py`、`commons/logger.py`、`commons/waits.py`，以及对应六个单元测试；另追踪了 `pages/Home.py`、`pages/app_common.py` 和所有 `DriverManager`/`capture_failure` 的调用边界。
+- 当前树：`dc81bda1aa1d557f402e9e0328d263caca1c5a06`；该提交只更正审查文档指标。生产基线仍为本报告的 `f4e37d8c6753729522ed2771095f859caf83b494`。
+- 继承边界：历史基础报告由 `9dbb62c` 引入且明确无法取得可靠 Git 基线；`9dbb62c..HEAD` 中 `commons/android_runtime.py` 已变更（现代 Appium 的 `mobile: startActivity` 回退），故历史报告只作设计和测试背景，不能作为当前兼容性结论。
+- 未执行 Appium、ADB、网络、真机或真实写入操作。`logs/` 为既有未跟踪运行时目录，未检查、编辑或纳入提交。
+
+### 已验证的正向行为
+
+- `AppConfig.from_env()` 对已支持字段采用默认值，再由环境覆盖；`ConfigManager.create_config()` 的已知显式参数最后覆盖环境值（`commons/config.py:49-66, 106-109`）。布尔值只接受显式 token，未知值回退默认值（`commons/config.py:15-24`）。
+- Driver 仅在 Remote、启动策略与隐式等待均完成后写入缓存（`commons/driver.py:50-67`）；普通关闭对同一缓存对象至多调用一次 `quit()`（`commons/driver.py:70-84`）。
+- 等待使用单调时钟、输入校验和可行动的必需元素错误（`commons/waits.py:17-38, 52-66`）；Driver 查找异常会传播，未被转换为“未找到”。
+- 截图和 XML 采集彼此独立，且 XML 在写盘前调用 `sanitize_xml()`（`commons/diagnostics.py:65-83`）。这不覆盖下列脱敏绕过。
+
+### 确认缺陷
+
+| 优先级 | 位置 | 证据与影响 | 修复方向 |
+| --- | --- | --- | --- |
+| P1 | `commons/driver.py:50-64` | `webdriver.Remote()` 成功后，若 `post_session_android_launch()`（55 行）或 `implicitly_wait()`（56 行）抛异常，处理器只移除缓存键，未对局部 `driver` 调用 `quit()`。远端 Appium session 因而可能遗留，后续重试会创建额外 session。现有 `test_driver.py` 只覆盖 Remote 自身失败（46-55 行），未覆盖该路径。 | 预先置 `driver = None`；异常时若已创建则尽力 `quit()`，记录清理失败但保留原始异常；新增两项启动后失败测试。 |
+| P1 | `commons/logger.py:15-18, 36-48` | `_SECRET_PATTERN` 仅匹配 `password|code|token` 后接 `:` 或 `=`。实际验证 `redact_text('password secret-value; verification code 123456; token abc')` 原样返回；这些值会写入文件和控制台处理器，违背“不得输出密码/验证码/token 值”的保证。现有测试只覆盖 `key=value` 形式（`test_logger.py:40-53`）。 | 优先让敏感字段走结构化、按字段名脱敏的日志 API；同时覆盖常见空格、引号、JSON、格式化参数和异常消息形式的红线测试。 |
+| P1 | `commons/diagnostics.py:15-22, 45-49, 75-77` | XML 脱敏同样只识别命名属性或纯数字 `text/content-desc`。实际验证 `<node text='password secret-value' content-desc='token abc' />` 写入前仍原样保留两个值；失败证据 XML 可泄露敏感显示内容。现有测试仅覆盖 `password=`、手机号和纯数字验证码（`test_diagnostics.py:37-53`）。 | 以 XML 属性为单位解析/重写，按敏感 key、字段语义及 value 内的键值片段脱敏；补充上述反例和混合语言/JSON 值测试。 |
+
+### 风险与覆盖缺口（非确认缺陷）
+
+| 优先级 | 位置 | 风险依据 | 建议 |
+| --- | --- | --- | --- |
+| P2 | `commons/driver.py:38-67` | 缓存查询和写入未受锁保护；两个线程可同时看到缺失的 `session_name` 并各自创建一个 Remote session，最后一个覆盖缓存。仓库未提供并发调用证据，故列为风险而非已复现缺陷。 | 用每 session 锁/单飞机制覆盖整个“检查—创建—发布”临界区，并增加并发单例会话测试。 |
+| P2 | `commons/driver.py:74-84` | `quit()` 抛异常后仍将缓存值设为 `None`，丢失可能仍存活的 session 引用；不能重试关闭，下一次获取会新建 session。异常是否表示远端已关闭取决于 Driver/Appium，当前离线证据无法确认。 | 失败时保留可重试引用或显式隔离为 closing/failed 状态，并规定重试/强制清理语义。 |
+| P3 | `commons/config.py:52-66, 106-109` | 空 `APPIUM_SERVER_URL` 会成为空字符串而非拒绝或回退；未知显式参数被静默丢弃。已支持字段的优先级正确，但必需连接值与错误拼写缺少 fail-fast 反馈。 | 对 URL、包名和设备名做非空/格式校验；未知覆盖参数抛出明确异常；为两种失败模式补充单元测试。 |
+
+### 离线验证与结论边界
+
+因历史基础证据不能绑定可靠提交且 `commons/android_runtime.py` 后续变更，按增量规则执行了：
+
+```powershell
+& 'C:\Users\18718\Desktop\appium_project\venv\Scripts\python.exe' -m pytest -q `
+  testcases\test_android_runtime.py `
+  testcases\test_config.py `
+  testcases\test_diagnostics.py `
+  testcases\test_driver.py `
+  testcases\test_logger.py `
+  testcases\test_waits.py
+```
+
+最新一次精确输出：`.....................                                                    [100%]`，`21 passed in 0.70s`（0 failed）。该结果确认当前已测行为，不反驳上述未覆盖的错误路径；也不构成 Appium、设备或网络兼容性结论。
