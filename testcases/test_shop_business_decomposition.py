@@ -187,6 +187,17 @@ def test_open_goods_detail_stops_when_search_fails():
     ]
 
 
+def test_open_goods_detail_returns_false_when_first_product_cannot_open():
+    page = DetailRecorder(open_ok=False)
+
+    assert page.open_goods_detail("可乐") is False
+    assert page.events == [
+        ("is-detail",),
+        ("search", "可乐"),
+        ("open-first",),
+    ]
+
+
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
