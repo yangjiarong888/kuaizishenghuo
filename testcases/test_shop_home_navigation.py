@@ -156,6 +156,11 @@ def test_strict_recovery_never_bypasses_guard_with_coordinate_fallback(monkeypat
     coordinate_attempts = []
     adb_attempts = []
     install_failed_recovery_boundaries(monkeypatch, page)
+    monkeypatch.setattr(
+        page,
+        "ensure_mall_tab",
+        lambda *, settle: False,
+    )
     real_coordinate_fallback = page._tap_mall_bottom_tab_by_coordinate
 
     def record_coordinate_fallback():
@@ -179,11 +184,16 @@ def test_strict_recovery_never_bypasses_guard_with_coordinate_fallback(monkeypat
     assert driver.execute_scripts == []
 
 
-def test_default_recovery_keeps_coordinate_fallback_compatibility(monkeypatch):
+def test_default_recovery_retries_coordinate_once_when_ensure_fails(monkeypatch):
     driver = RecoveryFallbackDriver()
     page = ShopHomePage(driver)
     coordinate_attempts = []
     install_failed_recovery_boundaries(monkeypatch, page)
+    monkeypatch.setattr(
+        page,
+        "ensure_mall_tab",
+        lambda *, settle: False,
+    )
     monkeypatch.setattr(
         page,
         "_tap_mall_bottom_tab_by_coordinate",
