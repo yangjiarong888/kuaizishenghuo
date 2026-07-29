@@ -97,7 +97,7 @@ a63e281 fix: guard mall structural fallback
 | 域 | 静态审查 | 离线验证 | 真机无副作用 | 真实写入 |
 | --- | --- | --- | --- | --- |
 | 公共基础 | 已完成（含 3 个确认缺陷、3 个风险） | 已通过（21 passed） | 未执行 | 未授权未执行 |
-| 登录与首页 | 未开始 | 未开始 | 未执行 | 未授权未执行 |
+| 登录与首页 | 已完成（新增 1 个 P0、2 个 P1；2 个 P2 风险、1 个 P3 风险） | 10 passed，1 deselected（安全排除真实认证） | 未执行 | 未授权未执行 |
 | 商城只读浏览 | 未开始 | 未开始 | 未执行 | 未授权未执行 |
 | 商城订单边界 | 未开始 | 未开始 | 未执行 | 未授权未执行 |
 | 外卖 | 未开始 | 未开始 | 未执行 | 未授权未执行 |
@@ -181,5 +181,54 @@ a63e281 fix: guard mall structural fallback
   testcases\test_logger.py `
   testcases\test_waits.py
 ```
+
+## 10. Task 3：登录与首页审查
+
+### 版本、范围与边界
+
+- 当前审查 SHA：`1324555b9ba4d8f02218c70c4840da37ea6b5d8c`；历史登录/首页实现报告对应 `fe1353a`。对任务指定生产/测试及共享调用链执行差异检查，仅有 `commons/android_runtime.py` 变更；本域文件没有直接差异，但共享 runtime 已变，历史结论只作线索。
+- 已逐一复审 20 个任务指定生产文件和 `test_home.py`、`test_login.py`、`test_login_page_unit.py`、`test_main_cli.py`，并核对 Task 2 的 Driver/runtime/logger/diagnostics 证据。没有读取、修改或提交 `logs/`。
+- 未启动 Appium、ADB、设备或网络；未登录、发短信/语音验证码、发送客服消息、改密码或改变 OAuth 状态。因此不声明当前设备或 App 版本兼容性。
+
+### 正向证据
+
+- `run_login_method()` 在构造 `LoginPage` 前以 allowlist 拒绝未知方法；`main()` 对 `login`、`method`、`all` 要求显式 `--method`，一次只派发被选 provider（`scripts/run_login.py:12-45`，`scripts/main.py:32-47`）。
+- 注入 Driver 不由 LoginPage/Home 关闭，自建 Driver 使用命名 session 关闭（`pages/login/login_page.py:40-59`，`pages/Home.py:74-78,787-791`）。离线用例覆盖该所有权边界。
+- 默认手机号、密码与新密码均仅从环境读取且默认空；独立密码入口在建 Driver 前拒绝缺失凭据（`pages/login/data.py:10-48`，`scripts/password_login_standalone.py:46-65`）。验证码仅记录长度、输入过程不直接记录账号/密码值（`pages/login/mixins/semantics_mixin.py:154-172`，`find_click_mixin.py:275-402`）。Task 2 已确认的共享 logger/XML 脱敏 P1 仍适用。
+- 登录入口优先 ID/文本/content-desc/UiSelector，坐标后备会复核登录页；首页 Tab 回退和登录后 H5 恢复均有状态检查（`navigation_postlogin_mixin.py:149-220,892-910`，`pages/Home.py:426-462`）。
+
+### 确认缺陷
+
+| 优先级 | 位置 | 证据、影响与修复方向 |
+| --- | --- | --- |
+| P0 | `pytest.ini:2-6`; `testcases/test_login.py:15-30`; `pages/login/mixins/password_mixin.py:223-350` | 指定 pytest 选择会收集 `device` 标记的 `test_forget_password`，但 pytest 没有默认排除该标记。fixture 会创建真实 Driver，且在提供环境凭据时流程会发码、输入新密码、点击完成。原样运行不是离线测试并会违反本任务边界。默认排除 device；改密/发码/OAuth 使用独立显式破坏性授权开关，未授权时 skip。 |
+| P1 | `scripts/smoke_test.py:20-66`; `scripts/main.py:38-45` | 冒烟直接建 `webdriver.Remote()`，异常路径隐式返回 `None`；调度器以 `is not False` 判成功。因此默认 `smoke`、`quick`、`all` 可在真实冒烟失败后退出 0，且 `all` 会继续登录。显式返回 bool、失败非零退出，并将设备冒烟移出默认/quick。 |
+| P1 | `pages/Home.py:380-405,471-543` | 搜索/客服点击后即使目标状态未确认、回首页失败仍返回 `True`；金刚区固定等待 3 秒后报告点击成功，未断言目的页。这会把定位、认证弹层或 Driver 故障转换为绿灯。只有目标和回退状态都通过才返回成功，改用显式等待并保留 action/locator 错误。 |
+
+Task 2 的 3 个共享 P1（Driver 创建后失败可能遗留 session、logger 空格形式敏感值未脱敏、诊断 XML 文本敏感片段未脱敏）均影响本域登录凭据/验证码及失败证据；本节不重复计数，详见第 9 节。
+
+### 风险与覆盖缺口
+
+| 优先级 | 位置 | 风险依据与建议 |
+| --- | --- | --- |
+| P2 | `pages/login/mixins/oauth_mixin.py:2025-2155`; `pages/login/mixins/state_popup_mixin.py:136-172` | 发码路径使用宽泛“验证码/短信”定位、bounds/手势后备与轮询；通用弹窗还会勾选 checkbox 并点击“同意/确认”。`phone` 方法虽需显式选择，但无设备证据不能证明不会误点或产生认证副作用。将发码和协议确认拆为具名、状态受限、一次性步骤，并以模拟 Driver 覆盖。 |
+| P2 | `pages/login/mixins/find_click_mixin.py:933-951`; `pages/login/mixins/oauth_mixin.py:423-916` | OAuth 在 Driver API 不可用时回退 ADB，随后自动点第三方“允许/同意/授权”。provider 不会串行混跑，但无法仅凭静态证据证明第三方屏语义唯一。删除或显式授权 ADB 后备，并以已验证 provider 包/授权页状态约束提交。 |
+| P3 | 本域 20 个生产文件 | 6,894 物理行、154 个 `time.sleep(...)`、205 个宽泛 `except`；超 800 行的 `Home.py` (873)、`find_click_mixin.py` (985)、`navigation_postlogin_mixin.py` (910)、`oauth_mixin.py` (2,486)。这是复杂度风险而非单独缺陷；按状态机/登录方式拆分、统一显式等待和窄异常，并给后备路径补离线失败断言。 |
+
+### 离线验证与安全结论
+
+先以相同文件选择执行 `--collect-only`，结果为 `11 tests collected in 0.72s`，其中包含真实设备的 `TestLogin::test_forget_password`。所以没有运行任务简报的原样命令；这是安全跳过，不是通过/失败。运行的安全等价离线子集为：
+
+```powershell
+& 'C:\Users\18718\Desktop\appium_project\venv\Scripts\python.exe' -m pytest -q -m 'not device' `
+  testcases\test_home.py `
+  testcases\test_login.py `
+  testcases\test_login_page_unit.py `
+  testcases\test_main_cli.py
+```
+
+输出：`10 passed, 1 deselected in 0.75s`。它仅覆盖注入 Driver、dispatch allowlist 与离线 CLI 分支，不覆盖真实认证、SMS/语音、OAuth、UI 定位或设备兼容性。
+
+### Task 2 原有离线结论
 
 最新一次精确输出：`.....................                                                    [100%]`，`21 passed in 0.70s`（0 failed）。该结果确认当前已测行为，不反驳上述未覆盖的错误路径；也不构成 Appium、设备或网络兼容性结论。
