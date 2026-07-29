@@ -127,7 +127,9 @@ Trace Driver creation, cache insertion, startup failure cleanup, owned/unowned s
 
 Verify explicit waits expose failure reasons, screenshot and XML capture are independent, XML is sanitized before disk write, and diagnostics do not convert Driver faults into success.
 
-- [ ] **Step 4: 运行基础层离线测试**
+- [ ] **Step 4: 按增量规则运行基础层离线测试**
+
+Only run this focused command when foundation files changed after the inherited report, the historical evidence cannot be tied to a commit, or a finding needs reproduction. Otherwise record the focused run as skipped and rely on Task 9's fresh full non-device suite.
 
 Run:
 
@@ -177,7 +179,9 @@ Trace account/password/code inputs from source to click/send boundary. Confirm n
 
 Review text/id/semantic locators before coordinates, state checks after navigation, popup handling, back behavior, and whether broad exceptions hide authentication or Driver failures.
 
-- [ ] **Step 4: 运行登录/首页离线测试**
+- [ ] **Step 4: 按增量规则运行登录/首页离线测试**
+
+Only run this focused command when login/home files changed after the inherited report, the historical evidence cannot be tied to a commit, or a finding needs reproduction. Otherwise record the focused run as skipped and rely on Task 9's fresh full non-device suite.
 
 Run:
 
@@ -221,7 +225,9 @@ Verify facade compatibility, mixin order, parser re-export, moved method signatu
 
 Trace mall-tab direct, structural and recovery fallbacks. Confirm strict navigation disables every coordinate fallback while default flows preserve their documented compatibility.
 
-- [ ] **Step 3: 运行商城浏览离线测试**
+- [ ] **Step 3: 按增量规则运行商城浏览离线测试**
+
+Run this focused command because the current branch contains post-report shop navigation safety and decomposition changes. Record the exact result; do not repeat the retained device run.
 
 Run:
 
@@ -270,7 +276,9 @@ Verify navigation-only rejects all mutation capabilities, checkout without submi
 
 Check parsing precision, tolerance, empty/malformed input, snapshot consistency, response validation, sensitive response logging and exception classification.
 
-- [ ] **Step 4: 运行全部商城订单离线测试**
+- [ ] **Step 4: 按增量规则运行全部商城订单离线测试**
+
+Run this focused command because the current branch contains post-report mall-order safety validation changes. No device mutation is authorized.
 
 Run:
 
@@ -314,7 +322,9 @@ Confirm CLI and production code contain no fixed/default payment password, no au
 
 Trace add-item, checkout preview, final confirmation, delivery-time selection, order-detail detection and cancellation. Mark every persistent action and its authorization gate.
 
-- [ ] **Step 4: 运行外卖离线测试**
+- [ ] **Step 4: 按增量规则运行外卖离线测试**
+
+Only run this focused command when takeout files changed after the inherited report, the historical evidence cannot be tied to a commit, or a finding needs reproduction. Otherwise record the focused run as skipped and rely on Task 9's fresh full non-device suite.
 
 Run:
 
@@ -355,7 +365,9 @@ Verify `create_order(submit=False)` cannot click the create button, required fie
 
 Determine whether `ShippingPage` is an active business entry or an orphan helper. Check its locator, wait, screenshot and exception behavior and map any caller.
 
-- [ ] **Step 4: 运行跑腿与充值离线测试**
+- [ ] **Step 4: 按增量规则运行跑腿与充值离线测试**
+
+Only run this focused command when transfer/charge files changed after the inherited report, the historical evidence cannot be tied to a commit, or a finding needs reproduction. Otherwise record the focused run as skipped and rely on Task 9's fresh full non-device suite.
 
 Run:
 
