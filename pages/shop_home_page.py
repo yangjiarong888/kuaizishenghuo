@@ -907,7 +907,7 @@ class ShopHomePage:
                 return True
             self.tap_top_back()
             time.sleep(0.7)
-        if self.ensure_mall_tab(settle=1.0) or self._tap_mall_bottom_tab_by_coordinate():
+        if self.ensure_mall_tab(settle=1.0):
             self.mall_list_gesture_scroll_to_top(6)
             time.sleep(0.4)
         ok = self._is_mall_home_main_list_visible()

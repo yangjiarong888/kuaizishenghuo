@@ -19,7 +19,7 @@ The last two commits are approved safety fixes discovered during the initial rea
 
 | Check | Result |
 | --- | --- |
-| `ShopBusinessPage` facade size | 1,322 lines before extraction at `4bb07d4`; 484 lines after |
+| `ShopBusinessPage` facade size | 1,395 physical lines before extraction at `4bb07d4`; 519 physical lines after |
 | Mall-focused pytest set | 139 passed |
 | Full non-device pytest | 273 passed, 1 deselected |
 | In-memory compilation | `compiled=96` |

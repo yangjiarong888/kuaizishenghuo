@@ -100,6 +100,10 @@ def test_order_message_requires_submit_and_its_own_capability():
     [
         ["--submit-order"],
         ["--allow-cart-mutation"],
+        ["--allow-address-mutation"],
+        ["--allow-order-creation"],
+        ["--allow-order-cancellation"],
+        ["--allow-order-message"],
         ["--add-to-cart-only"],
         ["--run-cart-delete"],
         ["--ensure-test-address"],

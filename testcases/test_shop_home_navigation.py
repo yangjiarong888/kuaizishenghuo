@@ -117,3 +117,79 @@ def test_default_structural_mall_tab_click_failure_keeps_coordinate_fallback(
     assert driver.execute_scripts == [
         ("mobile: clickGesture", {"x": 760, "y": 2260})
     ]
+
+
+class RecoveryFallbackDriver(EmptyHomeDriver):
+    def __init__(self):
+        super().__init__()
+        self.execute_scripts = []
+
+    def execute_script(self, name, args):
+        self.execute_scripts.append((name, args))
+
+
+def install_failed_recovery_boundaries(monkeypatch, page):
+    monkeypatch.setattr(shop_home_page.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(page, "_is_mall_home_main_list_visible", lambda: False)
+    monkeypatch.setattr(
+        page,
+        "tap_back_to_top_if_visible",
+        lambda *, warn_when_missing=False: False,
+    )
+    monkeypatch.setattr(
+        page,
+        "uia2_scroll_mall_content_to_beginning",
+        lambda: False,
+    )
+    monkeypatch.setattr(
+        page,
+        "mall_list_gesture_scroll_to_top",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(page, "tap_top_back", lambda: None)
+
+
+def test_strict_recovery_never_bypasses_guard_with_coordinate_fallback(monkeypatch):
+    driver = RecoveryFallbackDriver()
+    page = ShopHomePage(driver)
+    page._mall_tab_coordinate_fallback_disabled = True
+    coordinate_attempts = []
+    adb_attempts = []
+    install_failed_recovery_boundaries(monkeypatch, page)
+    real_coordinate_fallback = page._tap_mall_bottom_tab_by_coordinate
+
+    def record_coordinate_fallback():
+        coordinate_attempts.append("coordinate")
+        return real_coordinate_fallback()
+
+    monkeypatch.setattr(
+        page,
+        "_tap_mall_bottom_tab_by_coordinate",
+        record_coordinate_fallback,
+    )
+    monkeypatch.setattr(
+        page,
+        "_adb_tap",
+        lambda *args, **kwargs: adb_attempts.append((args, kwargs)) or False,
+    )
+
+    assert page.force_recover_mall_home_main_list(attempts=1) is False
+    assert coordinate_attempts == []
+    assert adb_attempts == []
+    assert driver.execute_scripts == []
+
+
+def test_default_recovery_keeps_coordinate_fallback_compatibility(monkeypatch):
+    driver = RecoveryFallbackDriver()
+    page = ShopHomePage(driver)
+    coordinate_attempts = []
+    install_failed_recovery_boundaries(monkeypatch, page)
+    monkeypatch.setattr(
+        page,
+        "_tap_mall_bottom_tab_by_coordinate",
+        lambda: coordinate_attempts.append("coordinate") or True,
+    )
+
+    assert page.force_recover_mall_home_main_list(attempts=1) is False
+    assert coordinate_attempts == ["coordinate"]
+    assert driver.execute_scripts == []

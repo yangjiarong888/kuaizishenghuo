@@ -1011,6 +1011,10 @@ def validate_args(args) -> None:
             (
                 args.submit_order,
                 args.allow_cart_mutation,
+                args.allow_address_mutation,
+                args.allow_order_creation,
+                args.allow_order_cancellation,
+                args.allow_order_message,
                 args.add_to_cart_only,
                 address_mutation,
                 args.run_cart_delete,
