@@ -52,7 +52,7 @@ a63e281 fix: guard mall structural fallback
 | --- | --- | --- | --- | --- |
 | 公共基础 | `commons/*.py` | `test_android_runtime.py`（Android runtime）；`test_config.py`（配置）；`test_diagnostics.py`（诊断）；`test_driver.py`（Driver）；`test_logger.py`（日志）；`test_waits.py`（等待） | `2026-07-22-foundation-review.md` | Task 2 已完成静态审查并执行聚焦离线测试；证据与发现见第 9 节。 |
 | 登录与首页 | `pages/Home.py`、`pages/app_common.py`、`pages/login*`、`scripts/main.py`、`scripts/run_login.py`、`scripts/password_login_standalone.py`、`scripts/smoke_test.py` | `test_home.py`（首页）；`test_login.py`、`test_login_page_unit.py`（登录）；`test_main_cli.py`（主 CLI） | `2026-07-22-login-home-review.md` | 见第 5 节；均未开始/未执行。 |
-| 商城只读浏览 | `pages/shop_*`、`flows/shop_home_*`、`scripts/run_shop_home.py`、`scripts/run_shop_business.py` | `test_shop_home_navigation.py`（商城导航/严格模式）；`test_shop_business_decomposition.py`（搜索/详情拆分门面） | `2026-07-28-mall-safe-decomposition-review.md`；`2026-07-28-shop-business-readonly-decomposition-review.md` | 见第 5 节；均未开始/未执行。 |
+| 商城只读浏览 | `pages/shop_*`、`flows/shop_home_*`、`scripts/run_shop_home.py`、`scripts/run_shop_business.py` | `test_shop_home_navigation.py`（商城导航/严格模式）；`test_shop_business_decomposition.py`（搜索/详情拆分门面） | `2026-07-28-mall-safe-decomposition-review.md`；`2026-07-28-shop-business-readonly-decomposition-review.md` | Task 4 已完成静态审查与聚焦离线验证；证据、缺陷和风险见第 11 节。 |
 | 商城订单边界 | `pages/mall_order_*`、`flows/mall_order_*`、`scripts/run_mall_order_flow.py` | `test_mall_order_address.py`（地址）；`test_mall_order_cart.py`（购物车）；`test_mall_order_checkout.py`（结算）；`test_mall_order_cli.py`（CLI/能力）；`test_mall_order_http.py`（HTTP）；`test_mall_order_safety.py`（安全边界）；`test_mall_order_types.py`（类型/金额） | `2026-07-22-mall-order-boundary-review.md`；`2026-07-28-mall-safe-decomposition-review.md` | 见第 5 节；均未开始/未执行。 |
 | 外卖 | `pages/takeout_*`、`scripts/run_takeout_wangwang.py` | `test_takeout_cli.py`（CLI 组合）；`test_takeout_checkout_boundary.py`（结算/提交边界） | `2026-07-27-takeout-safe-checkout-review.md` | 见第 5 节；均未开始/未执行。 |
 | 跑腿 | `pages/transfer_page.py`、`scripts/run_transfer_business.py` | `test_transfer_page.py`（页面）；`test_transfer_cli.py`（CLI） | `2026-07-27-transfer-charge-review.md` | 见第 5 节；均未开始/未执行。 |
@@ -98,7 +98,7 @@ a63e281 fix: guard mall structural fallback
 | --- | --- | --- | --- | --- |
 | 公共基础 | 已完成（含 3 个确认缺陷、3 个风险） | 已通过（21 passed） | 未执行 | 未授权未执行 |
 | 登录与首页 | 已完成（新增 1 个 P0、2 个 P1；2 个 P2 风险、1 个 P3 风险） | 10 passed，1 deselected（安全排除真实认证） | 未执行 | 未授权未执行 |
-| 商城只读浏览 | 未开始 | 未开始 | 未执行 | 未授权未执行 |
+| 商城只读浏览 | 已完成（3 个确认缺陷、3 个风险） | 已通过（55 passed） | 未执行（仅核对 `a63e281` 保留证据） | 未授权未执行 |
 | 商城订单边界 | 未开始 | 未开始 | 未执行 | 未授权未执行 |
 | 外卖 | 未开始 | 未开始 | 未执行 | 未授权未执行 |
 | 跑腿 | 未开始 | 未开始 | 未执行 | 未授权未执行 |
@@ -232,3 +232,62 @@ Task 2 的 3 个共享 P1（Driver 创建后失败可能遗留 session、logger 
 ### Task 2 原有离线结论
 
 最新一次精确输出：`.....................                                                    [100%]`，`21 passed in 0.70s`（0 failed）。该结果确认当前已测行为，不反驳上述未覆盖的错误路径；也不构成 Appium、设备或网络兼容性结论。
+
+## 11. Task 4：商城首页、搜索、分类和商品详情只读审查
+
+### 范围、版本与安全边界
+
+- 审查基线：`c54dd3b0edec47b98d76f84a5d6b5fac7362d806`。逐一静态核对 `pages/shop_home_page.py`、`pages/shop_business_page.py`、搜索/详情 mixin、全部 `pages/shop_mall_*.py`、`flows/shop_home_*`、四个 phase、两个商城 CLI 和两份指定测试。
+- 本次只运行 Fake Driver 离线测试并只读核对 brief 指定的三份保留文件；未启动 Appium、ADB、设备或网络，未点击加购、立即购买、下单、地址、分享/复制、客服/IM、支付或其他写入控件。
+- `ShopBusinessPage` 的 MRO 为 `MallBusinessSearchMixin → MallBusinessDetailMixin → ShopHomePage`，mixin 不定义 `__init__`，facade 的 `super().__init__(driver, wait_sec=...)` 落到 `ShopHomePage`（`pages/shop_business_page.py:30-57`）。与拆分前 `4bb07d4` 静态对照，38 个迁移方法签名差异为 0；`parse_price_text` 从详情 mixin 导入并由 facade 继续重导出（`pages/shop_business_page.py:12-16`、`pages/shop_business_detail_mixin.py:402-409`）。
+
+### 已验证的正向行为
+
+- `search_goods()` 只编排打开搜索页、输入/提交关键字、等待结果和浏览筛选；`open_goods_detail()` 只从搜索或商城首页打开商品；`browse_goods_detail()` 只调用主图、活动信息、详情滚动、更多商品和回顶方法。上述只读公开链未直接调用 facade 中的加购、订单、地址、IM、分享或支付助手（`pages/shop_business_search_mixin.py:472-493`，`pages/shop_business_detail_mixin.py:237-250,379-399`）；活动信息的宽泛定位风险另列如下。
+- 严格导航由 `run_navigation_verification()` 在 `try/finally` 内设置并恢复 `_mall_tab_coordinate_fallback_disabled`（`scripts/run_mall_order_flow.py:587-603`）。该 guard 同时覆盖 `ensure_mall_tab()` 的直接/末次坐标路径、结构点击失败后的 `mobile: clickGesture` 和恢复末端的坐标重试（`pages/shop_home_page.py:179-237,807-858,884-921`）；六个 Fake Driver 用例覆盖严格禁用与默认兼容回退（`testcases/test_shop_home_navigation.py:44-204`）。
+- 搜索/详情拆分测试覆盖方法表面、搜索和开详情的失败短路、价格 parser 以及 facade 重导出（`testcases/test_shop_business_decomposition.py:15-219`）。本次聚焦结果为 55 项全部通过。
+
+### 确认缺陷
+
+| 优先级 | 位置 | 证据、影响与后续修复方向 |
+| --- | --- | --- |
+| P0 | `scripts/run_shop_home.py:43-94`; `flows/shop_home_flow.py:83-141`; `flows/shop_home_phases/kingkong_daily_baihuo.py:12-22`; `flows/shop_home_phases/home_add_cart_badge.py:12-26`; `pages/shop_mall_product_detail_page.py:324-357` | CLI 无参时 `--skip-phase=[]`，转换为 `skip=None` 后默认执行全部四阶段；调用链包含分类选规格加购、详情加购与收藏、末次首页加购，且没有任何 `--allow-cart-mutation`/收藏授权。仅执行默认命令即可污染购物车和收藏状态。默认改为只读阶段；所有加购/收藏阶段必须同时要求具名动作和显式单次 capability，Driver 创建前拒绝缺失授权。 |
+| P0 | `scripts/run_shop_business.py:36-69,93-135`; `pages/shop_business_page.py:278-316,340-393,395-469,493-514` | CLI 无参默认 `action=full`、非空 IM 消息和 `share_target=复制链接`；调用链会复制分享、发送客服消息并点击“立即购买”进入确认订单页。`--submit-order` 只保护最终提交，不保护前三种有副作用动作，也没有独立分享/IM/结算授权。默认改为 `search` 或显式必填 action；复制、IM、立即购买/结算分别增加 capability，并在建 Driver 前验证组合。 |
+| P1 | `pages/shop_home_page.py:179-188,230-236,785-805` | 默认兼容路径把 ADB/Appium 坐标命令无异常直接当成商城 Tab 成功；尽管 `_tap_mall_bottom_tab_by_coordinate()` 文档称会由主列表标识校验，代码未调用该校验，`ensure_mall_tab()` 立即返回 `True`。布局变化或错误前台页会产生假阳性，并让后续默认写入流程在错误页面继续。每次坐标点击后必须等待 `_is_mall_home_main_list_visible()`；失败时继续语义/结构路径并最终 fail closed，增加“手势成功但目标状态未出现”用例。 |
+
+### 风险与覆盖缺口（非确认缺陷）
+
+| 优先级 | 位置 | 风险依据与建议 |
+| --- | --- | --- |
+| P2 | `pages/shop_business_search_mixin.py:76-112`; `pages/shop_business_detail_mixin.py:293-320,379-394` | 名为只读的详情浏览会用 `contains()` 匹配“活动/优惠/促销/领券/满减”并点击首个候选；静态证据不能确认线上“领券”是否只是打开面板还是直接领取，所以不升级为确认写入。改用已验证的活动信息容器 ID/状态 allowlist，排除领取/兑换/确认类控件，并加 Fake Driver 负向测试。 |
+| P2 | `testcases/test_shop_home_navigation.py:34-204`; `testcases/test_shop_business_decomposition.py:15-219`; `scripts/run_shop_home.py:43-94`; `scripts/run_shop_business.py:36-135` | 两份指定测试覆盖导航 guard 和拆分兼容，但没有 CLI 默认值/dispatch 测试，也没有断言只读 action 永不调用加购、收藏、分享、IM、结算助手；因此两个 P0 默认入口长期未被回归阻断。为两个 parser/dispatcher 增加“默认只读、写能力缺授权在 Driver 前拒绝、只读 helper 调用黑名单”测试。 |
+| P3 | Task 4 的 19 个生产文件 | 共 5,393 物理行、171 个 `time.sleep(...)`、222 个宽泛 `except`。这是定位/等待/错误可诊断性风险，不代表每一处均为缺陷。优先治理搜索、详情、Tab 恢复的固定等待与吞异常路径，并保持严格导航的失败断言。 |
+
+### 离线验证与历史统计核对
+
+执行的唯一 pytest 命令：
+
+```powershell
+& 'C:\Users\18718\Desktop\appium_project\venv\Scripts\python.exe' -m pytest -q `
+  testcases\test_shop_home_navigation.py `
+  testcases\test_shop_business_decomposition.py
+```
+
+精确输出：
+
+```text
+.......................................................                  [100%]
+55 passed in 0.74s
+```
+
+该结果只证明当前 Fake Driver 覆盖的导航 guard、迁移表面、编排短路和 parser 行为；不覆盖真实 UI 定位、Appium/ADB、设备、网络或业务写入安全。
+
+历史 `2026-07-28-shop-business-readonly-decomposition-review.md` 的“38 passed 覆盖 safety/navigation/decomposition”不能由保留证据支持：`46c5df3` 版本原报告明确记载“全部 `test_mall_order_*.py` + navigation + decomposition”为 **139 passed**；`a831d75` 在未保留命令/控制台文本、且同一提交还新增一个 decomposition 用例时，将数字改为 **38 passed**。`a831d75` 中两份 navigation/decomposition 文件与当前完全相同，而本次仅这两份就收集并通过 **55** 项，故 38 不可能代表所称 navigation/decomposition 全集，更不能代表再含 safety 的集合。历史文件不改写；38 仅保留为命令无法复原的历史子集数字。
+
+### 保留设备证据与当前结论边界
+
+- 三份文件只对应 `a63e281` 的当次严格导航：PNG SHA-256 `15F8E94C8060BE78E997CB660E3DA12E13BB3E5E05C5291695690E15551A7C2C`；XML `E9C1480634A307FF174635512954AB95C513EC3811C2050106CFE2DDEC74312F`；日志 `A4F437934BB5EF30D4FA577E872912D76C637CA5A340212FF66F5A01E661DA61`。
+- 截图显示 ₱33.00 的“可口可乐(经典美味)330ml”详情页；加购、立即购买、客服、收藏和购物车仅为画面中的被动控件。XML 文本含同一商品、价格及一组加购/立即购买控件，54 个属性值被替换为 `<redacted>`，敏感 phone/code/password-like 字面量扫描为 0。
+- XML 的 `<redacted>` 被原样写入属性值（例如 `password="<redacted>"`），因此不是 well-formed XML；本次只能做文本 token 核对，不能把它当作可解析层级证据。这是保留证据质量限制，不扩展为当前设备结论。
+- 28 行日志记录底栏结构进入商城、输入/提交“可乐”、详情快照 `unit_price=33.0`、两次安全返回和 Driver 正常关闭；未发现执行加购、分享/复制、IM、结算、提交订单、支付、地址、取消订单或网络异常动作的日志。
+- `e88173b` 与 `4224d71` 之后没有重跑真机；本 Task 也未运行设备。因此上述材料只能证明 `a63e281` 的单次只读路径，不能声明 `c54dd3b` 或当前 App/设备兼容，也不覆盖购物车、收藏、分享/复制、IM、结算、订单、支付、地址、取消、库存或异常网络流程。
