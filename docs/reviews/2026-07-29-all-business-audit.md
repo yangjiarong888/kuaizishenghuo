@@ -100,7 +100,7 @@ a63e281 fix: guard mall structural fallback
 | 登录与首页 | 已完成（新增 1 个 P0、2 个 P1；2 个 P2 风险、1 个 P3 风险） | 10 passed，1 deselected（安全排除真实认证） | 未执行 | 未授权未执行 |
 | 商城只读浏览 | 已完成（3 个确认缺陷、3 个风险） | 已通过（55 passed） | 未执行（仅核对 `a63e281` 保留证据） | 未授权未执行 |
 | 商城订单边界 | 已完成（3 个 P0、2 个 P1；4 类风险） | 已通过（91 passed） | 未执行 | 未授权未执行 |
-| 外卖 | 未开始 | 未开始 | 未执行 | 未授权未执行 |
+| 外卖 | 已完成（2 个 P0、5 个 P1；3 类风险） | 按增量规则跳过（Task 9 全量 non-device 兜底） | 未执行 | 未授权未执行 |
 | 跑腿 | 未开始 | 未开始 | 未执行 | 未授权未执行 |
 | 充值 | 未开始 | 未开始 | 未执行 | 未授权未执行 |
 | 配送辅助 | 未开始 | 未开始 | 未执行 | 未授权未执行 |
@@ -362,3 +362,58 @@ $mallTests = Get-ChildItem testcases -Filter 'test_mall_order_*.py' |
 ```
 
 该结果只证明当前 Fake Driver/monkeypatch 覆盖的参数 guard、离线编排、金额 parser 和注入 HTTP 边界；不覆盖真实 UI 定位、Appium/ADB、设备、网络、商品/库存最终一致性或任何业务写入。历史 `38 passed` 不能代表其所称 safety/navigation/decomposition 集合，Task 4 的统计核对结论保持不变。
+
+## 13. Task 6：外卖导航、结算预览、支付和取消边界审查
+
+### 范围、继承边界与安全限制
+
+- 审查基线：`d45442576edef7a3cddd00edf021f4fa4dd466cf`。逐行复审 8 个外卖生产文件、`scripts/run_takeout_wangwang.py`、`testcases/test_takeout_cli.py` 和 `testcases/test_takeout_checkout_boundary.py`。
+- 历史实现 `3a10b81`、报告 `62b665d` 均可精确绑定；`3a10b81..d454425` 和 `62b665d..d454425` 中上述 10 个文件均无差异，仅共享 `commons/` 发生变化。因此“默认不提交、`--submit-order` 依赖 `--checkout`、生产路径不自动输入密码”的域内历史结论可作当前静态线索；共享 Driver/runtime 风险、历史离线计数和设备结果均不能提升为当前兼容性结论。
+- 本 Task 未启动 Appium、ADB、真机或网络，未运行外卖脚本，未选菜/改购物车、未提交或取消订单、未输入支付密码、未支付、未发消息；既有 `logs/` 未读取、修改或纳入提交。
+
+### 动作—授权—顺序矩阵
+
+| 动作 | CLI/调用入口 | 当前授权或确认边界 | 顺序与静态结论 |
+| --- | --- | --- | --- |
+| 导航、定位、进店 | 默认执行；不带 `--checkout` | 无写 capability；默认只导航 | `main()` 只调用定位、外卖 Tab 和进店，随后在 `args.checkout=False` 时结束；不调用加购、购物车或结算门面（`scripts/run_takeout_wangwang.py:177-212`; `pages/takeout_page.py:1071-1085`）。定位选择会改变 App 内当前城市，但不属于购物车/订单写入。 |
+| 选分类并加菜 | `--checkout` | 只有一个宽泛动作开关；无独立 cart-mutation capability | 先点分类，再打开首商品/规格并执行“加购”，明确写购物车（`pages/takeout_checkout_mixin.py:1728-1804,2734-2746`）。所以 checkout preview 不是只读，也不是无业务数据变化入口。 |
+| 购物车与结算预览 | `--checkout` | 同一宽泛开关；无独立 checkout-preview capability | 加购后打开购物车、去结算并第一次点击可能名为“确认支付/提交订单/立即支付”的底栏，之后随机选地址（`pages/takeout_checkout_mixin.py:1861-2055,2747-2766`）。未传 `--submit-order` 只保护第二次最终确认。 |
+| 优惠券、备注、通知、支付方式、配送时间 | `--checkout`；各子参数 | 无逐项 capability；默认 `coupon-policy=auto`、余额支付和非空备注 | 预览阶段会自动选可用券、写备注/快捷备注、选支付方式和配送时段，然后才检查 `submit_order`（`scripts/run_takeout_wangwang.py:115-151`; `pages/takeout_checkout_mixin.py:2186-2239,2421-2491,2640-2690,2767-2804`）。这些是持久化或潜在持久化的结算表单动作，不是纯页面预览。 |
+| 最终确认并创建订单 | `--checkout --submit-order` | 仅动作组合；无独立 order-creation capability、金额上限或二次确认 token | CLI 在 Driver 前拒绝孤立 `--submit-order`，但第二次点击后已创建订单，并直接进入后续支付/取消编排（`scripts/run_takeout_wangwang.py:172-184,201-227`; `pages/takeout_checkout_mixin.py:2802-2823`）。 |
+| 余额支付 | `--checkout --submit-order`，默认 `--checkout-payment balance` | 密码输入由用户手工完成；无自动输入；无独立 payment capability 或人工完成确认信号 | 第二次确认后只等待页面出现“取消订单”，不会接收或记录密码（`pages/takeout_checkout_mixin.py:2693-2698,2805-2818`）。但页面标识被直接当作手工支付完成，见 P0。 |
+| 货到付款 | `--checkout --submit-order --checkout-payment cod` | 无独立 payment/COD capability | 第二次确认后跳过人工等待，只检查“取消订单”入口，再继续取消（`pages/takeout_checkout_mixin.py:2783-2789,2805-2812`）。 |
+| 取消订单 | 提交链隐式自动执行；无 `--cancel-order` 参数 | 无 cancellation capability、无单独人工确认；只依赖任意可见取消入口 | 订单详情检查后无条件进入取消、选固定原因并提交（`pages/takeout_checkout_mixin.py:2811-2822`; `pages/takeout_cancel_order_mixin.py:978-1085`）。未绑定本次订单身份，且入口未点中也不立即终止。 |
+| 订单消息 | 无入口 | 无 capability；当前编排不可达 | Task 6 范围内未发现发送订单消息的方法或 CLI 参数；本次没有执行消息动作。后续若新增必须使用独立 action + capability，并在 Driver 前校验。 |
+
+### 已验证的正向行为
+
+- `validate_args()` 在 `DriverManager()` 创建前执行；孤立 `--submit-order` 返回 `2`，且 `argparse` 自身会在未知参数/非法 choice 时以 `2` 退出（`scripts/run_takeout_wangwang.py:57-184,200-202`; `testcases/test_takeout_cli.py:15-46`）。
+- 默认 `checkout=False`、`submit_order=False`；navigation-only 进店后结束，不触发店内下单门面（`scripts/run_takeout_wangwang.py:71-82,207-212`; `testcases/test_takeout_cli.py:8-13`）。
+- 生产代码、CLI 和环境引用中未发现固定/默认支付密码、`--password` 或自动密码输入方法；余额路径只记录人工输入提示并等待，手工等待超时时不会继续取消（`pages/takeout_checkout_mixin.py:2693-2698,2813-2818`; `testcases/test_takeout_checkout_boundary.py:128-139`）。测试桩仍含固定默认密码字面量，单列 P1。
+- 主编排的名义顺序是分类 → 加购 → 购物车 → 去结算 → 第一次确认 → 地址 → 券/偏好 → 支付方式 → 配送时间 → `submit_order` guard → 第二次最终确认 → 手工支付等待或 COD 详情检查 → 取消（`pages/takeout_checkout_mixin.py:2701-2823`）。预览用例确认第二次确认、支付等待、订单详情和取消均不执行（`testcases/test_takeout_checkout_boundary.py:74-86`）。
+
+### 确认缺陷
+
+| 优先级 | 位置 | 证据、影响与后续修复方向 |
+| --- | --- | --- |
+| P0 | `scripts/run_takeout_wangwang.py:71-151,172-227`; `pages/takeout_checkout_mixin.py:2701-2823` | `--checkout --submit-order` 同时授权购物车写入、创建订单、余额/COD 后续处理和自动取消；不存在独立 `allow-cart-mutation`、`allow-order-creation`、`allow-order-payment`、`allow-order-cancellation`，也没有最大实付上限。一次创建意图被扩张为多个持久化动作。拆为具名 action + 一次性 capability；创建订单增加有限正数金额上限；无 payment/cancel capability 时停在相应边界。 |
+| P0 | `pages/takeout_checkout_mixin.py:2693-2698,2805-2822`; `pages/takeout_cancel_order_mixin.py:978-1022` | 余额“手工支付完成”没有人工确认信号、支付状态或本次订单身份，只要 Native/任意 WebView 出现“取消订单”就返回成功，随后自动取消。未支付订单详情、旧订单详情或错误页面的取消入口都可能被误报为本次支付完成，并可能取消非本次订单。要求用户显式确认完成，再核对本次订单号、金额和已支付状态；取消必须绑定该订单身份。 |
+| P1 | `scripts/run_takeout_wangwang.py:83-151,172-184,200-227`; `testcases/test_takeout_cli.py:24-86` | Driver 前语义校验只覆盖 `--submit-order` 依赖。`--category`、配送时段、支付方式、券、取件码、通知和备注等 checkout-only 参数在没有 `--checkout` 时被静默忽略，仍创建 Driver并以导航成功返回 0；测试也只覆盖 submit 组合。所有子参数必须绑定 `--checkout`，冲突/孤立参数在 Driver 前返回 `2`，并补参数矩阵测试。 |
+| P1 | `pages/takeout_checkout_mixin.py:1728-1804,2186-2239,2421-2491,2738-2804`; `scripts/run_takeout_wangwang.py:71-151` | 名为“结算预览”的 `--checkout` 实际会加菜写购物车，并默认自动选券、输入 `test order` 备注、选择支付方式和配送时间；只在创建订单前停止。影响是预览可能污染购物车和结算草稿，且一个宽泛开关授权多类潜在持久化动作。默认预览应只读展示；加购、券、备注、通知、支付方式和配送时间分别要求明确动作/capability。 |
+| P1 | `pages/takeout_delivery_time_mixin.py:462-499,520-689`; `scripts/run_takeout_wangwang.py:95-112` | 配送弹层四轮及坐标兜底均未确认打开时，代码没有 fail closed，仍扫描并点击日期/时段；指定 `--delivery-slot-contains` 无匹配时会保留全量池并把首项误标为匹配，序号 `0/负数` 则退化为随机选择，后天失败还会静默退到明天/今天。可在错误页面点击或用非请求时段继续下单。Driver 前校验正序号；弹层、日期和显式 hint 必须逐步确认，任何显式请求未满足即终止。 |
+| P1 | `pages/takeout_cancel_order_mixin.py:842-975,1022-1085`; `pages/takeout_locators.py:132-150,165-177` | `shop_cancel_order_flow()` 未点到“取消订单”入口时没有返回失败，仍继续找“确定取消”、选理由和提交；取消结果又把“提交成功”“退款”“待商家”等宽泛文案或连续三次入口消失当成功，未绑定订单/弹层上下文。可能在错误页面继续破坏性点击并误报取消成功。入口、确认层、理由、提交和目标订单状态必须逐步 fail closed；成功只接受与订单号绑定的明确取消状态。 |
+| P1 | `testcases/test_takeout_checkout_boundary.py:57-59,103-106`; `testcases/test_takeout_cli.py:15-21` | 测试桩仍定义 `shop_enter_pay_password(password="legacy-default")`。虽现有断言证明该桩不被调用、生产路径也无自动输入，但 Task 6 明确要求测试不得含固定/默认支付密码，因此历史“无密码”结论不能覆盖本次更严格扫描。删除带默认值的密码桩，改用若被访问即抛错的无秘密 sentinel/属性黑名单断言。 |
+
+### 风险与覆盖缺口（非确认缺陷）
+
+| 优先级 | 位置 | 风险依据与建议 |
+| --- | --- | --- |
+| P1 | `pages/takeout_checkout_mixin.py:1984-2055`; `pages/takeout_delivery_time_mixin.py:502-515`; `pages/takeout_cancel_order_mixin.py:126-175,672-713` | 提交、配送和取消链保留多组坐标/宽泛文案/JavaScript 点击兜底。部分已有弹层标题约束，但无法由静态证据证明所有 UI 版本语义唯一。每个破坏性点击前后都验证页面状态、目标订单和控件语义；未经单独 capability 禁用坐标兜底。 |
+| P2 | `testcases/test_takeout_cli.py:8-86`; `testcases/test_takeout_checkout_boundary.py:6-139` | 两份测试只覆盖 submit/checkout 基础组合和主编排事件，不覆盖 checkout-only 孤立参数、配送显式 hint/序号 fail closed、订单身份、人工支付确认、取消入口缺失及取消成功状态。为动作—capability矩阵和每个失败短路补 Fake Driver 用例。 |
+| P3 | Task 6 的 8 个生产文件 | 当前共 6,123 物理行、151 个 `time.sleep(...)`、231 个宽泛异常；超过 800 行的 `takeout_checkout_mixin.py`、`takeout_page.py`、`takeout_cancel_order_mixin.py` 与历史风险一致。固定等待和吞异常可掩盖页面状态错误；优先治理提交、配送和取消状态机，不把复杂度计数当作缺陷数量。 |
+
+### 测试决策与设备边界
+
+两份指定测试经静态核对仅使用 `RecordingCheckout`/Fake Manager 和 monkeypatch，不实例化真实 `DriverManager`、不连接设备或网络，不产生业务写入（`testcases/test_takeout_cli.py:37-86`; `testcases/test_takeout_checkout_boundary.py:6-139`）。但域内生产/测试自可绑定的 `62b665d` 后没有变化，历史证据可绑定 SHA，且上述发现均由静态控制流直接证实、不需要复现，因此按增量规则跳过聚焦 pytest；由 Task 9 新鲜全量 non-device 测试兜底。
+
+本 Task 的静态结论不证明真实 UI 定位、配送时间、余额/COD、订单详情、取消接口、Appium/ADB、设备、网络或当前 App 版本兼容性。真实写入保持“未授权未执行”。
