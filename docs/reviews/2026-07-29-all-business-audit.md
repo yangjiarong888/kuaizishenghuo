@@ -53,7 +53,7 @@ a63e281 fix: guard mall structural fallback
 | 公共基础 | `commons/*.py` | `test_android_runtime.py`（Android runtime）；`test_config.py`（配置）；`test_diagnostics.py`（诊断）；`test_driver.py`（Driver）；`test_logger.py`（日志）；`test_waits.py`（等待） | `2026-07-22-foundation-review.md` | Task 2 已完成静态审查并执行聚焦离线测试；证据与发现见第 9 节。 |
 | 登录与首页 | `pages/Home.py`、`pages/app_common.py`、`pages/login*`、`scripts/main.py`、`scripts/run_login.py`、`scripts/password_login_standalone.py`、`scripts/smoke_test.py` | `test_home.py`（首页）；`test_login.py`、`test_login_page_unit.py`（登录）；`test_main_cli.py`（主 CLI） | `2026-07-22-login-home-review.md` | 见第 5 节；均未开始/未执行。 |
 | 商城只读浏览 | `pages/shop_*`、`flows/shop_home_*`、`scripts/run_shop_home.py`、`scripts/run_shop_business.py` | `test_shop_home_navigation.py`（商城导航/严格模式）；`test_shop_business_decomposition.py`（搜索/详情拆分门面） | `2026-07-28-mall-safe-decomposition-review.md`；`2026-07-28-shop-business-readonly-decomposition-review.md` | Task 4 已完成静态审查与聚焦离线验证；证据、缺陷和风险见第 11 节。 |
-| 商城订单边界 | `pages/mall_order_*`、`flows/mall_order_*`、`scripts/run_mall_order_flow.py` | `test_mall_order_address.py`（地址）；`test_mall_order_cart.py`（购物车）；`test_mall_order_checkout.py`（结算）；`test_mall_order_cli.py`（CLI/能力）；`test_mall_order_http.py`（HTTP）；`test_mall_order_safety.py`（安全边界）；`test_mall_order_types.py`（类型/金额） | `2026-07-22-mall-order-boundary-review.md`；`2026-07-28-mall-safe-decomposition-review.md` | 见第 5 节；均未开始/未执行。 |
+| 商城订单边界 | `pages/mall_order_*`、`flows/mall_order_*`、`scripts/run_mall_order_flow.py` | `test_mall_order_address.py`（地址）；`test_mall_order_cart.py`（购物车）；`test_mall_order_checkout.py`（结算）；`test_mall_order_cli.py`（CLI/能力）；`test_mall_order_http.py`（HTTP）；`test_mall_order_safety.py`（安全边界）；`test_mall_order_types.py`（类型/金额） | `2026-07-22-mall-order-boundary-review.md`；`2026-07-28-mall-safe-decomposition-review.md` | Task 5 已完成静态审查与全部匹配离线测试；证据、缺陷和风险见第 12 节。 |
 | 外卖 | `pages/takeout_*`、`scripts/run_takeout_wangwang.py` | `test_takeout_cli.py`（CLI 组合）；`test_takeout_checkout_boundary.py`（结算/提交边界） | `2026-07-27-takeout-safe-checkout-review.md` | 见第 5 节；均未开始/未执行。 |
 | 跑腿 | `pages/transfer_page.py`、`scripts/run_transfer_business.py` | `test_transfer_page.py`（页面）；`test_transfer_cli.py`（CLI） | `2026-07-27-transfer-charge-review.md` | 见第 5 节；均未开始/未执行。 |
 | 充值 | `pages/charge_page.py` | `test_charge_page.py`（页面/提交边界） | `2026-07-27-transfer-charge-review.md` | 见第 5 节；均未开始/未执行。 |
@@ -99,7 +99,7 @@ a63e281 fix: guard mall structural fallback
 | 公共基础 | 已完成（含 3 个确认缺陷、3 个风险） | 已通过（21 passed） | 未执行 | 未授权未执行 |
 | 登录与首页 | 已完成（新增 1 个 P0、2 个 P1；2 个 P2 风险、1 个 P3 风险） | 10 passed，1 deselected（安全排除真实认证） | 未执行 | 未授权未执行 |
 | 商城只读浏览 | 已完成（3 个确认缺陷、3 个风险） | 已通过（55 passed） | 未执行（仅核对 `a63e281` 保留证据） | 未授权未执行 |
-| 商城订单边界 | 未开始 | 未开始 | 未执行 | 未授权未执行 |
+| 商城订单边界 | 已完成（3 个 P0、2 个 P1；4 类风险） | 已通过（91 passed） | 未执行 | 未授权未执行 |
 | 外卖 | 未开始 | 未开始 | 未执行 | 未授权未执行 |
 | 跑腿 | 未开始 | 未开始 | 未执行 | 未授权未执行 |
 | 充值 | 未开始 | 未开始 | 未执行 | 未授权未执行 |
@@ -291,3 +291,74 @@ Task 2 的 3 个共享 P1（Driver 创建后失败可能遗留 session、logger 
 - XML 的 `<redacted>` 被原样写入属性值（例如 `password="<redacted>"`），因此不是 well-formed XML；本次只能做文本 token 核对，不能把它当作可解析层级证据。这是保留证据质量限制，不扩展为当前设备结论。
 - 28 行日志记录底栏结构进入商城、输入/提交“可乐”、详情快照 `unit_price=33.0`、两次安全返回和 Driver 正常关闭；未发现执行加购、分享/复制、IM、结算、提交订单、支付、地址、取消订单或网络异常动作的日志。
 - `e88173b` 与 `4224d71` 之后没有重跑真机；本 Task 也未运行设备。因此上述材料只能证明 `a63e281` 的单次只读路径，不能声明 `c54dd3b` 或当前 App/设备兼容，也不覆盖购物车、收藏、分享/复制、IM、结算、订单、支付、地址、取消、库存或异常网络流程。
+
+## 12. Task 5：商城购物车、地址、结算和订单边界审查
+
+### 范围、版本、历史与安全边界
+
+- 审查基线：`d5b3dc79e7063d9942f17346742305bbe4b96494`。逐行复审 `scripts/run_mall_order_flow.py`、三个 `pages/mall_order_*_mixin.py`、`flows/mall_order_http.py`、`flows/mall_order_types.py` 和全部 7 个 `test_mall_order_*.py`。
+- `2026-07-22-mall-order-boundary-review.md` 可绑定到 `c9d2bec`，但当前树新增 HTTP/三个 mixin/五份测试且订单脚本已重构，原结论不能直接继承。`a831d75..d5b3dc7` 的本 Task 生产文件和测试无差异，故 7 月 28 日最终报告的离线历史只作当前树背景；其中设备证据仍只属于更早的 `a63e281` 单次严格导航。
+- 未启动 Appium、ADB、设备或网络，未运行商城脚本，未加购/删除购物车、未新增/编辑/复制地址、未提交/取消订单、未发送消息、未支付。既有 `logs/` 未读取、修改或纳入提交。
+
+### 动作—独立 capability—Driver 前校验矩阵
+
+| 动作 | 动作参数 | 当前 capability | Driver 前校验与实际边界 | 结论 |
+| --- | --- | --- | --- | --- |
+| 严格只读导航 | `--verify-navigation-only` | 不需要写 capability；反向拒绝全部 mutation capability | `validate_args()` 拒绝购物车、地址、创建、取消、消息 capability 及异常流，`main()` 随后才创建 Driver（`scripts/run_mall_order_flow.py:1009-1031,1084-1110`）。 | 正向通过；Fake Driver 覆盖该顺序。 |
+| 进入结算页（立即购买） | `--flow buy_now` | 无独立 capability | `--flow` 默认就是 `buy_now`；无参也会建 Driver 并派发立即购买至结算（`scripts/run_mall_order_flow.py:753-755,1169-1173`）。未传 `--submit-order` 时在提交点前返回（`pages/mall_order_checkout_mixin.py:1000-1024`），不会创建订单或支付。 | “结算”与“提交”已在运行时分开，但“无动作返回 2”未满足，见 P1。 |
+| 购物车加购/结算/删除 | `--flow cart|both`、`--add-to-cart-only`、`--run-cart-delete`、`--cart-delete-prepare-item` | 共用 `--allow-cart-mutation` | 校验在 Driver 前（`scripts/run_mall_order_flow.py:1038-1047`）；加购、删除和购物车结算分别可达（`pages/mall_order_cart_mixin.py:237-365`）。 | 缺 capability 会返回 2；同一粗粒度 capability 授权加与删，列为风险。 |
+| 地址选择/新增/编辑/复制 | `--ensure-test-address`、`--force-add-test-address`、`--edit-test-address`、`--copy-test-address`、`--add-test-address-only` | 共用 `--allow-address-mutation` | 任一参数缺 capability 在 Driver 前拒绝（`scripts/run_mall_order_flow.py:1000-1008,1033-1036`）；新增、编辑、复制调用链分别位于 `pages/mall_order_address_mixin.py:463-476,696-724,726-747`。 | 缺 capability 会返回 2；新增/编辑/复制没有独立 capability，列为风险。 |
+| 提交并创建订单 | `--submit-order` | `--allow-order-creation` + 正数 `--max-payable` | Driver 前检查动作、创建 capability 和表面正数上限（`scripts/run_mall_order_flow.py:1053-1061`）；运行时先核对限额再点击提交（`pages/mall_order_checkout_mixin.py:988-1027`）。 | 正向顺序正确；有限值校验可被非有限浮点绕过，见 P0。 |
+| 支付/货到付款确认 | `--payment-method cod|wechat_mock`；由 `--submit-order` 后隐式触发 | **无独立支付 capability** | 创建订单后无条件调用 `pay_and_assert()`；COD/微信支付都会点击支付控件，微信测试钩子还会发 HTTP POST（`pages/mall_order_checkout_mixin.py:735-870,1025-1027`）。 | 创建 capability 被当成支付授权，见 P0。 |
+| 取消本次订单 | `--cancel-created-order` | 独立 `--allow-order-cancellation`，并要求 `--submit-order` | Driver 前组合校验（`scripts/run_mall_order_flow.py:1063-1069`）；运行时还要求本次解析到订单号后才点取消（`pages/mall_order_checkout_mixin.py:1030-1067`）。 | 正向通过；不会默认取消。 |
+| 订单消息 | `--send-order-im` | 独立 `--allow-order-message`，并要求 `--submit-order` | Driver 前校验 capability、提交依赖和与 `--skip-order-im` 的冲突（`scripts/run_mall_order_flow.py:1071-1081`）；默认不发送（`pages/mall_order_checkout_mixin.py:976-984,1028-1029`）。 | 正向通过；不会默认发送。 |
+| 断网提交异常流 | `--run-network-exception` | **无提交/订单创建/网络变更 capability** | 参数被 navigation-only 拒绝，但普通模式没有 capability/限额校验；运行时切网络后直接点击“提交订单”（`scripts/run_mall_order_flow.py:720-750,985,1009-1031,1185-1186`）。 | 实际执行提交尝试，见 P0。 |
+
+### 已验证的正向行为
+
+- navigation-only 会拒绝所有现有 mutation capability、动作和两类异常流；`main()` 捕获 `ValueError` 后返回 `2`，且 Driver 创建位于完整校验之后（`scripts/run_mall_order_flow.py:998-1110`）。
+- 正常结算在金额/商品信息核对后，未传 `--submit-order` 会于 `submit_order()` 和 `pay_and_assert()` 前返回；默认 `submit_order=False`、地址动作=False、取消=False、消息=False，所以不会默认创建地址、订单、支付、取消或发消息（`scripts/run_mall_order_flow.py:853-925,958-970`；`pages/mall_order_checkout_mixin.py:1000-1031`）。结算页仍会按默认策略处理优惠券、备注和预订时间，这是结算表单操作，不是本次已验证的持久化写入结论。
+- 取消和消息各有独立 capability，均依赖本次显式提交；取消还要求已解析订单号。购物车、地址缺 capability 和 `--add-to-cart-only` 与提交冲突均在 Driver 前返回 `2`。
+- 金额链会核对详情单价、确认页名称/规格/单价、商品金额减优惠加运费、收银台金额和显式上限（`pages/mall_order_checkout_mixin.py:586-643,695-733,988-1027`）；库存接口缺字段/非标量/非法整数以及订单状态非待发货均 fail closed（`flows/mall_order_http.py:124-150,170-196`）。
+- HTTP 对 4xx/5xx、`HTTPError`、`URLError`、超时和非法 JSON 转为不含 URL/响应正文的 `MallOrderHttpError`（`flows/mall_order_http.py:71-122`）。这不覆盖下述未分类异常和业务响应结构风险。
+
+### 确认缺陷
+
+| 优先级 | 位置 | 证据、影响与后续修复方向 |
+| --- | --- | --- |
+| P0 | `scripts/run_mall_order_flow.py:896-925,1053-1061,1124-1129`; `pages/mall_order_checkout_mixin.py:735-870,1025-1027` | `--submit-order --allow-order-creation --max-payable <值>` 在创建订单后无条件执行支付；没有 `--pay-order`/`--allow-order-payment`。默认 COD 仍会选择货到付款并点击确认，`wechat_mock` 会发起支付并调用成功钩子。订单创建授权被扩张为支付授权。将“提交订单”和“支付”拆成两个动作，新增独立一次性支付 capability；无支付动作时停在收银台。 |
+| P0 | `scripts/run_mall_order_flow.py:720-750,985,998-1081,1185-1186` | `--run-network-exception` 在普通模式不要求 `--submit-order`、订单创建 capability、金额上限或网络变更 capability，却会切断设备网络并点击“提交订单”。若网络切换报告成功但实际未生效，或请求在断网前后竞态送达，可能创建未授权订单；无论后端结果如何，脚本已执行未授权提交尝试。要求独立异常流动作和网络变更 capability，并复用创建订单/有限金额校验；切网后先验证离线状态，异常结束强校验恢复。 |
+| P0 | `scripts/run_mall_order_flow.py:912-915,1053-1061`; `pages/mall_order_checkout_mixin.py:988-998` | `argparse type=float` 接受 `NaN`/`Infinity`；`NaN <= 0` 和 `payable > NaN` 都为 false，`Infinity` 则成为无限上限。因此显式创建动作可绕过“有限正数最大实付”保护。解析后先用 `math.isfinite()` 拒绝非有限值，金额改用 `Decimal`/最小货币单位并增加 `nan/inf/-inf` Driver 前返回 2 测试。 |
+| P1 | `scripts/run_mall_order_flow.py:753-755,998-1081,1110,1169-1186` | 无参不是“无动作”：默认 `flow=buy_now`，会创建 Driver 并尝试进入结算，而不是返回 2；`--force-add-test-address --allow-address-mutation`、`--cart-delete-prepare-item --allow-cart-mutation` 等缺少父动作的组合也能通过校验，随后落入默认立即购买。默认改为显式 `action=None` 或严格只读；所有子参数必须绑定唯一父动作，孤立 capability/子参数在 Driver 前返回 2。 |
+| P1 | `flows/mall_order_http.py:152-168`; `pages/mall_order_checkout_mixin.py:802-842` | 模拟支付成功接口只要返回任意合法 JSON（包括 `{"ok": false}`）就被当作钩子完成；完整响应还被写入日志。随后无状态 API时，页面只出现宽泛“订单详情”也可通过 `WAIT_SHIP_MARKERS`，没有要求“支付成功/待发货”。这可把业务失败响应和未支付订单详情误报为支付成功。定义严格成功 schema（布尔成功、订单号、金额/状态匹配），失败 fail closed；页面兜底必须出现明确支付成功/待发货状态，日志只记录允许字段。 |
+
+### 风险与覆盖缺口（非确认缺陷）
+
+| 优先级 | 位置 | 风险依据与建议 |
+| --- | --- | --- |
+| P1 | `scripts/run_mall_order_flow.py:762-880,1000-1047`; `pages/mall_order_cart_mixin.py:237-365`; `pages/mall_order_address_mixin.py:463-476,696-747` | `--allow-cart-mutation` 同时授权加购、数量减少和删除；`--allow-address-mutation` 同时授权选择、创建、编辑和复制。现有校验确实在 Driver 前，但不满足“一个具体动作对应一个独立 capability”的最小权限目标。拆分 add/delete/checkout-cart 及 address-select/create/edit/copy capability，并逐项补 action+capability 矩阵测试。 |
+| P2 | `flows/mall_order_types.py:11-70`; `pages/mall_order_checkout_mixin.py:235-323,586-643,720-731` | 金额全部使用二进制 `float` 和固定 `0.02` 容差；`parse_money()` 盲删逗号，会接受畸形分组如 `₱1,2,3.45`，无明确币种的任意小数也可被解析。当前测试覆盖空值、三位小数和 `1.2.3`，未覆盖币种冲突、分组、超大值、非有限值和负 tolerance。改用 Decimal、严格币种/分组语法及按币种定义的最小单位。 |
+| P2 | `pages/mall_order_checkout_mixin.py:586-643,695-733,830-870`; `flows/mall_order_http.py:124-150` | 详情到结算核对名称/规格/单价，但商品总价缺失时回退详情价×数量，未显式核对结算页数量；提交后仅核对订单号、金额和宽泛状态，没有再核对订单商品/规格/数量快照。库存允许负整数，且下单后只读一次，未考虑最终一致性。补完整 checkout/order snapshot、非负库存和有界轮询测试。 |
+| P2 | `flows/mall_order_http.py:71-122`; `pages/mall_order_checkout_mixin.py:802-819`; `pages/mall_order_address_mixin.py:131-155,664-668` | HTTP 只拒绝 `status >= 400`，缺失 status 被当作 200，3xx/意外 opener 异常没有统一分类；未限制响应大小。mock 支付记录完整响应，地址输入还记录姓名、手机号、微信号原值，可能泄露敏感业务数据。严格只接收 2xx、限制响应大小、统一异常为脱敏边界错误，并改为字段级白名单日志。 |
+
+### 离线验证与设备边界
+
+先静态核对 7 个匹配文件及 pytest 配置：测试均标记 `unit` 或为纯值测试；Driver 路径使用 Fake Manager、对象桩或 monkeypatch，HTTP 使用注入 `FakeOpener` 和 `.invalid` URL；没有 `webdriver.Remote`、真实 `DriverManager()`、ADB、subprocess、socket、device marker 或 autouse fixture。
+
+执行的唯一 pytest 命令：
+
+```powershell
+$mallTests = Get-ChildItem testcases -Filter 'test_mall_order_*.py' |
+  Select-Object -ExpandProperty FullName
+& 'C:\Users\18718\Desktop\appium_project\venv\Scripts\python.exe' -m pytest -q $mallTests
+```
+
+精确输出：
+
+```text
+........................................................................ [ 79%]
+...................                                                      [100%]
+91 passed in 1.06s
+```
+
+该结果只证明当前 Fake Driver/monkeypatch 覆盖的参数 guard、离线编排、金额 parser 和注入 HTTP 边界；不覆盖真实 UI 定位、Appium/ADB、设备、网络、商品/库存最终一致性或任何业务写入。历史 `38 passed` 不能代表其所称 safety/navigation/decomposition 集合，Task 4 的统计核对结论保持不变。
