@@ -55,9 +55,9 @@ a63e281 fix: guard mall structural fallback
 | 商城只读浏览 | `pages/shop_*`、`flows/shop_home_*`、`scripts/run_shop_home.py`、`scripts/run_shop_business.py` | `test_shop_home_navigation.py`（商城导航/严格模式）；`test_shop_business_decomposition.py`（搜索/详情拆分门面） | `2026-07-28-mall-safe-decomposition-review.md`；`2026-07-28-shop-business-readonly-decomposition-review.md` | Task 4 已完成静态审查与聚焦离线验证；证据、缺陷和风险见第 11 节。 |
 | 商城订单边界 | `pages/mall_order_*`、`flows/mall_order_*`、`scripts/run_mall_order_flow.py` | `test_mall_order_address.py`（地址）；`test_mall_order_cart.py`（购物车）；`test_mall_order_checkout.py`（结算）；`test_mall_order_cli.py`（CLI/能力）；`test_mall_order_http.py`（HTTP）；`test_mall_order_safety.py`（安全边界）；`test_mall_order_types.py`（类型/金额） | `2026-07-22-mall-order-boundary-review.md`；`2026-07-28-mall-safe-decomposition-review.md` | Task 5 已完成静态审查与全部匹配离线测试；证据、缺陷和风险见第 12 节。 |
 | 外卖 | `pages/takeout_*`、`scripts/run_takeout_wangwang.py` | `test_takeout_cli.py`（CLI 组合）；`test_takeout_checkout_boundary.py`（结算/提交边界） | `2026-07-27-takeout-safe-checkout-review.md` | 见第 5 节；均未开始/未执行。 |
-| 跑腿 | `pages/transfer_page.py`、`scripts/run_transfer_business.py` | `test_transfer_page.py`（页面）；`test_transfer_cli.py`（CLI） | `2026-07-27-transfer-charge-review.md` | 见第 5 节；均未开始/未执行。 |
-| 充值 | `pages/charge_page.py` | `test_charge_page.py`（页面/提交边界） | `2026-07-27-transfer-charge-review.md` | 见第 5 节；均未开始/未执行。 |
-| 配送辅助 | `pages/shipping_page.py` | 未发现匹配 `test_shipping_*.py` 的文件；调用方、活跃入口和覆盖关系待复核。 | 无独立报告 | 见第 5 节；均未开始/未执行。 |
+| 跑腿 | `pages/transfer_page.py`、`scripts/run_transfer_business.py` | `test_transfer_page.py`（页面）；`test_transfer_cli.py`（CLI） | `2026-07-27-transfer-charge-review.md` | Task 7 已完成静态审查；按增量规则跳过聚焦测试，证据、缺陷和风险见第 14 节。 |
+| 充值 | `pages/charge_page.py` | `test_charge_page.py`（页面/提交边界） | `2026-07-27-transfer-charge-review.md` | Task 7 已完成静态审查；当前仅页面对象和离线测试，无生产调用方或独立安全 CLI，见第 14 节。 |
+| 配送辅助 | `pages/shipping_page.py` | 未发现匹配 `test_shipping_*.py` 的文件；首页调用链见第 14 节。 | 无独立报告 | Task 7 已完成静态审查；确认为首页活跃入口骨架，不代表完整海运业务覆盖。 |
 
 测试文件总数为 **24**。上表将每个 `testcases/test_*.py` 文件映射到一个生产区域；“无独立测试”是覆盖缺口，不是生产缺陷结论。
 
@@ -101,11 +101,11 @@ a63e281 fix: guard mall structural fallback
 | 商城只读浏览 | 已完成（3 个确认缺陷、3 个风险） | 已通过（55 passed） | 未执行（仅核对 `a63e281` 保留证据） | 未授权未执行 |
 | 商城订单边界 | 已完成（3 个 P0、2 个 P1；4 类风险） | 已通过（91 passed） | 未执行 | 未授权未执行 |
 | 外卖 | 已完成（2 个 P0、5 个 P1；3 类风险） | 按增量规则跳过（Task 9 全量 non-device 兜底） | 未执行 | 未授权未执行 |
-| 跑腿 | 未开始 | 未开始 | 未执行 | 未授权未执行 |
-| 充值 | 未开始 | 未开始 | 未执行 | 未授权未执行 |
-| 配送辅助 | 未开始 | 未开始 | 未执行 | 未授权未执行 |
+| 跑腿 | 已完成（1 个 P0、2 个 P1；3 类风险/缺口） | 按增量规则跳过（Task 9 全量 non-device 兜底） | 未执行 | 未授权未执行 |
+| 充值 | 已完成（2 个 P1；4 类风险/缺口；仅页面对象可达） | 按增量规则跳过（Task 9 全量 non-device 兜底） | 未执行 | 未授权未执行 |
+| 配送辅助 | 已完成（2 个 P1；3 类风险/缺口；活跃入口骨架） | 无独立测试；Task 9 全量 non-device 兜底 | 未执行 | 未授权未执行 |
 
-特别说明：公共基础的 Task 2 静态审查与聚焦离线测试已完成，证据见第 9 节；其余业务域尚未完成静态审查。历史离线计数仅为审查线索；Task 9 的新鲜全量非真机回归才是当前树的最终离线结论。
+特别说明：Task 2–7 的域内静态审查均已完成；各任务的聚焦测试运行或增量跳过证据见第 9–14 节。历史离线计数仅为审查线索；Task 9 的新鲜全量非真机回归才是当前树的最终离线结论。
 
 ## 6. 历史证据继承与增量复审边界
 
@@ -123,13 +123,13 @@ a63e281 fix: guard mall structural fallback
 
 ## 7. 已知证据缺口（非缺陷结论）
 
-- 本任务未对任一域完成静态审查；因此尚无本次的文件/行号级缺陷结论。
-- 本任务未执行离线 pytest、全量回归或编译；所有历史通过数仅作背景，不能替代 Task 9 的当前树全量非真机回归。
+- Task 2–7 已完成域内静态审查并记录文件/行号级结论；尚未执行 Task 8 的跨域去重与 Task 9 的当前树全量 non-device 回归。
+- 各域聚焦 pytest 的运行或增量跳过不能替代 Task 9 的当前树全量 non-device 回归；所有历史通过数仅作背景。
 - 本任务未启动 Appium、未连接/操作设备，未执行真实写入或可能写入业务数据的命令。
 - 商城只读保留设备证据仅适用于提交 `a63e281` 的当次导航路径；后续 `e88173b` 和 `4224d71` 是离线验证，故不得声称当前设备兼容。
 - 外卖历史 `--checkout` 会加购/准备结算，可能留下购物车数据；它不属于严格无副作用验收路径。
-- 跑腿、充值的历史报告没有当前 App 版本设备兼容性结论；充值当前也缺少独立安全 CLI 的已验证结论。
-- `pages/shipping_page.py` 没有独立 `test_shipping_*.py` 映射，且其活跃入口/调用方尚待 Task 7 确认。
+- 跑腿、充值的历史报告没有当前 App 版本设备兼容性结论；Task 7 已确认充值没有生产调用方或独立安全 CLI，因此不可直接真机验收创建订单、保存/编辑账号。
+- `pages/shipping_page.py` 没有独立 `test_shipping_*.py` 映射；Task 7 已确认它由首页金刚区活跃调用，但只是页面可达性骨架，不覆盖港口、货物、运费、运单或提交业务。
 - 全局计数是规模/风险信号而非缺陷数量；域归属可能重叠，但全局计数只按唯一生产文件计算。
 
 ## 8. 后续更新约定
@@ -417,3 +417,69 @@ $mallTests = Get-ChildItem testcases -Filter 'test_mall_order_*.py' |
 两份指定测试经静态核对仅使用 `RecordingCheckout`/Fake Manager 和 monkeypatch，不实例化真实 `DriverManager`、不连接设备或网络，不产生业务写入（`testcases/test_takeout_cli.py:37-86`; `testcases/test_takeout_checkout_boundary.py:6-139`）。测试只能证明桩化编排事件，不证明通用底栏 helper 在真实 UI 中的阶段语义、guard 前点击后仍处于 pre-order 状态或未创建订单。域内生产/测试自可绑定的 `62b665d` 后没有变化，历史证据可绑定 SHA，且本缺陷由 helper 标签集合、坐标 fallback、调用位置和缺失状态断言直接证实、不需要复现，因此按增量规则跳过聚焦 pytest；由 Task 9 新鲜全量 non-device 测试兜底。
 
 本 Task 的静态结论不证明真实 UI 定位、配送时间、余额/COD、订单详情、取消接口、Appium/ADB、设备、网络或当前 App 版本兼容性。真实写入保持“未授权未执行”。
+
+## 14. Task 7：跑腿、充值和配送辅助业务审查
+
+### 范围、继承边界与调用关系
+
+- 审查基线：`783c75e27eb62776dbab9f5003cd5d80419630be`。逐行复审 `pages/transfer_page.py`、`scripts/run_transfer_business.py`、`pages/charge_page.py`、`pages/shipping_page.py` 和三份指定测试。
+- 历史报告 `410b508eee5045bf24418a2a9f96229c2a9943ab` 可精确绑定跑腿实现 `fe1353a69d6cb21b6488ada251a5a268a7159d94` 与充值实现 `180b320dd381562ee0363cc50e309d65456b165d`。当前跑腿/充值三个生产文件和三份测试的 Git blob 均与 `410b508` 完全一致；`pages/shipping_page.py` 与初始提交 `821ce45e98fe9108a196a41b7c239d34c227e548` 完全一致。
+- `410b508..783c75e` 的相关共享差异只有 `commons/android_runtime.py`。跑腿 CLI 创建 Driver、配送入口复用首页 Driver，均受当前 runtime/Driver 影响；共享层变化、历史离线计数和历史设备材料不能提升为当前设备或 App 兼容性结论。充值当前没有生产 Driver/入口调用。
+- 全仓 Python 调用搜索确认：`TransferPage` 由首页安全菜单检查和独立 CLI 调用（`pages/Home.py:18-19,640-642`; `scripts/run_transfer_business.py:15-17,45-78`）；`ChargePage` 除自身外只被 `testcases/test_charge_page.py` 引用，没有生产调用方或独立安全 CLI；`ShippingPage` 由首页导入、将“海运/海运物流”映射为 `shipping` 并在金刚区点击后调用（`pages/Home.py:18,64-72,632-642`），因此是**活跃入口骨架**，不是孤儿代码，也不等于完整业务覆盖。
+- 本 Task 未启动 Appium、ADB、真机或网络，未运行跑腿/充值脚本，未提交订单、支付、登录 Maya、保存/编辑账号或发送消息；既有 `logs/` 未读取、修改或纳入提交。
+
+### 动作—授权—目标状态矩阵
+
+| 域/动作 | 当前入口与默认值 | 当前授权/确认边界 | 静态结论 |
+| --- | --- | --- | --- |
+| 跑腿菜单往返 | `--action menus`；首页只调用 `verify_menu_round_trips()` | 无写 capability；逐项核对目标 Activity/标题并返回 Runner 首页 | 首页映射只执行三个菜单往返，不进入订单链（`pages/transfer_page.py:54-58,122-131`; `pages/Home.py:640-642`）。 |
+| 跑腿表单/结算预览 | `--action order|full`；默认 `submit_order=False` | 选择首个已保存取/收地址和首个配送时间，无独立 preview capability | 八个地址字段必须存在、非空且不等于占位文案；第二步后要求 `settlement` 存在。`submit_order(False)` 不点击该控件（`pages/transfer_page.py:59-75,133-190,250-273`）。这是表单动作，不是纯页面只读。 |
+| 跑腿创建订单 | `--submit-order` | 只有动作布尔值；无独立 order-creation capability、金额快照或最大实付 | 点击 `settlement` 后只要求 `PayActivity` 和“在线支付”，随后必然进入所选支付分支（`scripts/run_transfer_business.py:22-33,61-78`; `pages/transfer_page.py:181-190,270-285`）。创建与支付授权未分开。 |
+| 跑腿余额支付 | `--submit-order --payment-method balance`，默认支付方式 | 密码来自 `TRANSFER_PAY_PASSWORD`；无独立 payment capability | 自动选余额、点支付、输入密码并确认；结果只核对订单详情和宽泛非待付款状态，未绑定订单号、金额或表单快照（`pages/transfer_page.py:192-211,239-248,267-280`）。 |
+| 跑腿 Maya 登录/返回 | `--payment-method maya` 或 `--exercise-maya-return` | 账号/密码来自 `TRANSFER_MAYA_*`；无独立第三方认证/支付 capability | 点击 Maya 登录后最多三次返回，只要回到 `PayActivity` 就成功；没有 Maya 支付结果、订单身份或订单状态确认（`pages/transfer_page.py:213-237,262-285`）。 |
+| 充值表单与保存账号开关 | 直接调用 `ChargePage`；无生产入口/CLI | 供应商 allowlist、必填字段集合、图片数量和 toggle 状态；无 action/capability 层 | `set_save_account()` 读取并等待控件状态；`create_order(False)` 校验后不点击创建按钮（`pages/charge_page.py:243-332,362-384`）。仅为页面对象静态边界。 |
+| 充值创建订单 | `create_order(submit=True)` | 只有方法布尔值；无生产调用方、安全 CLI、金额上限或二次 capability | 页面对象会点击 `CREATE_ORDER_ID`；点击后没有订单号、金额或明确目标状态断言（`pages/charge_page.py:369-384`）。当前可达性限于直接调用页面对象，不能描述为现有生产 CLI 可达。 |
+| 充值账号编辑/复制/删除 | 直接调用 `manage_saved_account()` / `edit_saved_account()` | 只有 action 字符串；无生产调用方、独立 capability 或结果确认 | helper 可点击复制/编辑/删除与保存，测试仅以 Fake Driver 覆盖点击序列（`pages/charge_page.py:386-429`; `testcases/test_charge_page.py:316-363`）。不可直接真机验收。 |
+| 配送辅助可达性 | 首页金刚区点击“海运/海运物流”后自动调用 | 无独立 CLI；无业务 action/capability | `run_main_flow()` 只检查宽泛海运文案、固定等待 1 秒并返回；港口、货物、运费、运单和提交仍为 TODO（`pages/shipping_page.py:11-17,41-65`）。 |
+
+### 已验证的正向行为
+
+- 跑腿 CLI 默认 `action=full`、`submit_order=False`、`payment_method=balance`；页面默认 `run_order_flow(submit_order=False)`，在确认结算控件存在后直接返回，不点击创建订单（`scripts/run_transfer_business.py:22-33`; `pages/transfer_page.py:181-190,250-273`; `testcases/test_transfer_page.py:267-295,383-386`）。
+- 跑腿页面对象在任何表单点击前校验支付方式及所需 Maya/余额凭据；CLI 只从三个 `TRANSFER_*` 环境变量读取凭据，运行日志只写动作布尔值和异常类型，不写环境值或异常消息（`pages/transfer_page.py:250-269`; `scripts/run_transfer_business.py:37-52,79-87`）。这不消除 Task 2 已确认的共享 logger/XML 脱敏缺口，也不是当前设备验证。
+- 充值 `create_order(submit=False)` 对当前业务/供应商必填字段、拍照缴费图片和已启用的重复保存检查先 fail closed，且不点击创建订单；供应商和字段使用显式 allowlist（`pages/charge_page.py:64-96,243-283,346-384`）。生产文件未发现固定个人账号、手机号、支付密码或默认测试号。
+- `ShippingPage` 有真实首页调用链，但文档和代码都明确它是“骨架版/占位”页面可达性检查；本审查不把该入口提升为海运业务流程覆盖。
+
+### 确认缺陷
+
+| 优先级 | 域与位置 | 证据、影响与修复方向 |
+| --- | --- | --- |
+| P0 | 跑腿：`scripts/run_transfer_business.py:22-33,45-78`; `pages/transfer_page.py:181-237,250-285` | 独立 CLI 的 `--submit-order` 同时授权创建订单及余额/Maya 支付路径；没有独立 order-creation/payment/Maya-auth capability，也没有有限正数最大实付。余额路径会自动输入密码确认，Maya 路径会输入第三方凭据并点击登录。拆分 form-preview、create-order、authenticate-Maya、pay-balance/pay-Maya 动作和一次性 capability；创建前核对订单快照与有限金额上限，无支付 capability 时停在创建后明确状态。 |
+| P1 | 跑腿：`scripts/run_transfer_business.py:22-33,45-88`; `pages/transfer_page.py:260-269`; `testcases/test_transfer_cli.py:41-46,134-260` | CLI 没有 Driver 前语义校验：`menus` 可静默忽略提交/支付/Maya 参数；`payment-method=maya` 或 `exercise-maya-return` 在未提交时被忽略或在建 Driver 后才因缺凭据失败；提交缺凭据也在 Driver 创建后返回 `1`，不是无效组合要求的 `2`。增加纯 `validate_args()`，把所有孤立、冲突、缺 capability/凭据组合在 `DriverManager()` 前拒绝并补参数矩阵测试。 |
+| P1 | 跑腿：`pages/transfer_page.py:213-237,274-285`; `testcases/test_transfer_page.py:389-405` | Maya helper 点击登录后主动后退，只要重新出现 `PayActivity` 就返回成功；测试也把“回到支付页”定义为成功。该状态既不是 Maya 支付成功，也不是本次订单已支付；CLI 可把未支付或认证失败报为成功。明确 action 是“仅认证往返”还是“支付”，分别断言 Maya 认证结果或本次订单号、金额和已支付状态。 |
+| P1 | 充值（仅页面对象可达）：`pages/charge_page.py:255-283,362-384`; `testcases/test_charge_page.py:202-219,265-305` | “缴纳金额”只做非空字符串检查；负数、零、非数字、非有限值和任意大值都可进入 `filled_fields`，随后 `submit=True` 会点击创建订单。当前没有生产调用方/CLI，故不能称现有 CLI 可达，但直接复用该页面对象会缺少金额安全边界。使用 Decimal/最小货币单位、币种规则、有限正数范围和显式最大金额，提交前重新读取 UI 值核对。 |
+| P1 | 充值（仅页面对象可达）：`pages/charge_page.py:369-384`; `testcases/test_charge_page.py:274-283` | `create_order(submit=True)` 只把创建按钮点击成功当作订单创建成功，没有等待订单号、金额、供应商/账号快照或明确成功/失败状态。调用方会得到假阳性；当前无生产调用降低了即时可达性。点击后必须等待并绑定本次表单的明确目标状态，失败 fail closed。 |
+| P1 | 配送辅助：`pages/shipping_page.py:41-54`; `pages/Home.py:64-72,632-642` | 页面状态只用 `//*[contains(@text, "海运")]`；第二个“海运物流”条件还是前者子集。首页原入口或任何包含“海运”的残留文本即可让未跳转页面通过，没有 Activity、资源 ID 或多个独立标志。使用目的 Activity/URL、唯一资源 ID 与至少一个页面专属状态的组合等待，并增加“仍在首页”负向 Fake Driver 测试。 |
+| P1 | 配送辅助：`pages/Home.py:607-649`; `pages/shipping_page.py:56-65` | 首页在调用业务骨架前已把点击记入 `successful_clicks`，随后忽略 `ShippingPage.run_main_flow()` 的返回值；即使可达性检查返回 `False`，总结仍报告该海运入口成功。只在业务返回和回首页均成功后记录；业务失败应保存脱敏证据并在结果中区分“入口点击”和“目的页确认”。 |
+
+### 风险与覆盖缺口（非确认缺陷）
+
+| 优先级 | 域与位置 | 风险依据与建议 |
+| --- | --- | --- |
+| P2 | 跑腿：`pages/transfer_page.py:102-179,192-211,239-248` | 地址必填只校验非空/非占位，未校验手机号格式、取收地址身份或表单快照；支付方式点击后未确认选中；余额结果用四个宽泛状态且未绑定订单号/金额。为每个阶段建立 typed snapshot，并逐步验证选择状态、订单身份、金额和最终支付状态。 |
+| P2 | 跑腿测试：`testcases/test_transfer_page.py:302-379,389-432`; `testcases/test_transfer_cli.py:41-46,134-260` | 页面测试覆盖点击前凭据校验和宽泛结果，但 CLI 没有孤立/冲突/capability 参数矩阵，也没有“PayActivity 不是支付成功”的负向用例。补纯 parser/validator 测试和订单身份状态机测试。 |
+| P3 | 跑腿三个生产文件 | 当前共 831 物理行、0 个固定等待、18 个宽泛异常；宽泛异常会把元素/会话/状态故障统一压成 `False`。按 action/locator/state 分类错误并保留脱敏诊断；复杂度计数不是缺陷数量。 |
+| P2 | 充值：`pages/charge_page.py:346-384`; `testcases/test_charge_page.py:286-291` | “重复账号”实际只比较供应商显示名，不读取当前账号值或已保存账号身份；测试也只覆盖同供应商。它可能误拒绝同供应商的不同账号，或无法证明真正重复账号被识别。先明确一供应商一账号还是账号值唯一规则，再用规范化 provider+account key 比较并补边界测试。 |
+| P2 | 充值：`pages/charge_page.py:310-332,386-453` | 保存、编辑、复制、删除及记录删除都是可变更动作，但只有页面 helper，没有独立 action/capability、确认前后状态或生产编排；也没有“选择已保存账号进入表单”的方法/测试。按具体动作拆 capability，绑定账号身份并确认最终状态。 |
+| P2 | 充值：`pages/charge_page.py:127-183,243-384` | 页面对象以内部 `filled_fields`/`selected_provider` 代表 UI 状态，输入后未回读字段，供应商点击后也未等待选中状态；静态证据不能证明 UI 拒绝输入或页面重载时不会使用陈旧状态。提交前从 UI 重建并核对完整快照。 |
+| P2 | 充值入口与测试：`pages/charge_page.py:16-17`; `testcases/test_charge_page.py:1-423` | 全仓没有生产调用方或独立安全 CLI，只有 Fake Driver 页面测试；因此不可直接真机验收创建订单、保存/编辑账号，也没有当前设备定位证据。先建立默认无写入的入口，再为每个写动作增加显式 capability 和测试数据/清理计划。 |
+| P2 | 配送辅助：`pages/shipping_page.py:11-17,56-65` | `run_main_flow()` 明确仍是 TODO，只证明宽泛页面文案；未覆盖港口、货物类型、运费、运单、提交或异常恢复。入口活跃不等于业务覆盖，应把覆盖状态保持为“骨架”。 |
+| P2 | 配送辅助：`pages/shipping_page.py:23-39,41-65`; `pages/Home.py:632-649` | 只有超时返回值，无截图/XML/结构化失败原因；非 Timeout Driver 异常会传播，Home 又没有针对该调用的域内错误分类。接入共享脱敏诊断，区分 timeout/locator/session/state，并禁止把敏感表单写入证据。 |
+| P3 | 配送辅助测试与实现 | 没有 `test_shipping_*.py` 或针对首页 shipping 分发的测试；实现 66 行、1 个固定等待、0 个宽泛异常。增加活跃分发、首页残留文案、业务失败不计成功、异常脱敏证据的 Fake Driver 测试；不以代码短小代替覆盖。 |
+
+### 测试决策、日志边界与设备结论
+
+按增量规则没有运行三份指定 pytest。跑腿/充值三个生产文件和三份测试自可绑定报告 `410b508` 后均无差异，本次确认发现都可由动作顺序、返回状态和缺失校验直接静态证实，无需复现；Shipping 没有匹配测试。指定集合中的 `testcases/test_transfer_cli.py` 还会导入已初始化文件日志的模块，并主动读取该文件（`scripts/run_transfer_business.py:15-19`; `testcases/test_transfer_cli.py:5-10,24-38`; `commons/logger.py:51-64,84-91`），原样运行会创建或追加 `logs/`，不满足本 Task 的“不修改 logs”限制。
+
+因此本 Task 的 pytest 输出为“未运行；无输出”，由 Task 9 新鲜全量 non-device 回归兜底。历史报告中的 `36 passed`、`56 passed`、`157 passed, 1 deselected` 只属于 `410b508` 记录的当时离线证据，不是本次运行结果。
+
+本 Task 不证明跑腿表单/支付、Maya、充值供应商/账号/金额、配送页面定位、Appium/ADB、设备、网络或当前 App 版本兼容性。跑腿/充值订单、支付、账号保存/编辑及其他真实写入保持“未授权未执行”；充值在独立安全 CLI 和逐动作 capability 建立前明确为“不可直接真机验收”。
