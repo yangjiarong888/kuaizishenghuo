@@ -1,7 +1,7 @@
 # 全业务自动化审查：基线、清单与证据矩阵
 
 日期：2026-07-29
-范围：`commons/`、`pages/`、`flows/`、`scripts/` 中的生产 Python 文件，以及 `testcases/test_*.py`。这是全量审查的**清单和证据骨架**；不包含任何业务域的静态审查结论或缺陷结论。
+范围：`commons/`、`pages/`、`flows/`、`scripts/` 中的生产 Python 文件，以及 `testcases/test_*.py`。这是全量审查的清单、证据矩阵和增量结论文档；Task 2–7 的域内静态审查已完成，Task 8–10 的跨域审查、全量回归和最终收口尚待完成。
 
 ## 1. 当前审查基线
 
@@ -11,7 +11,7 @@
 | 审查 SHA | `f4e37d8c6753729522ed2771095f859caf83b494` |
 | 审查时工作区状态 | `?? logs/` |
 | 运行时未跟踪目录 | `logs/` 是唯一预期的未跟踪运行时目录；不加入提交。 |
-| 本报告的审查状态 | 基线与清单已建立；各域静态审查均尚未开始。 |
+| 本报告的审查状态 | Task 2–7 的域内静态审查已完成；Task 8–10 尚待完成。 |
 
 审查时最近十个提交：
 
@@ -41,7 +41,7 @@ a63e281 fix: guard mall structural fallback
 | 外卖 | `pages/takeout_page.py`, `pages/takeout_mixin.py`, `pages/takeout_shop_mixin.py`, `pages/takeout_checkout_mixin.py`, `pages/takeout_delivery_time_mixin.py`, `pages/takeout_cancel_order_mixin.py`, `pages/takeout_locators.py`, `scripts/run_takeout_wangwang.py` | 外卖导航、进店、结算预览、配送时间、取消边界与 CLI。 |
 | 跑腿 | `pages/transfer_page.py`, `scripts/run_transfer_business.py` | 跑腿页面与显式提交控制的 CLI。 |
 | 充值 | `pages/charge_page.py` | 充值表单、账号与创建订单边界。 |
-| 配送辅助 | `pages/shipping_page.py` | 配送指引/辅助页面；调用方与活跃入口待 Task 7 复核。 |
+| 配送辅助 | `pages/shipping_page.py` | 首页海运映射调用的页面可达性骨架；Task 7 已确认它是活跃入口，但不覆盖完整海运业务。 |
 | 包入口 | `pages/__init__.py`, `scripts/__init__.py` | 页面与脚本包入口。 |
 
 文件计数：公共基础 8、登录与首页 20、商城只读浏览 21、商城订单边界 6、外卖 8、跑腿 2、充值 1、配送辅助 1、包入口 2；合计 **69**。
@@ -51,10 +51,10 @@ a63e281 fix: guard mall structural fallback
 | 域 | 主要入口/生产区 | 当前测试文件（映射的生产区） | 历史报告 | 当前审查层状态 |
 | --- | --- | --- | --- | --- |
 | 公共基础 | `commons/*.py` | `test_android_runtime.py`（Android runtime）；`test_config.py`（配置）；`test_diagnostics.py`（诊断）；`test_driver.py`（Driver）；`test_logger.py`（日志）；`test_waits.py`（等待） | `2026-07-22-foundation-review.md` | Task 2 已完成静态审查并执行聚焦离线测试；证据与发现见第 9 节。 |
-| 登录与首页 | `pages/Home.py`、`pages/app_common.py`、`pages/login*`、`scripts/main.py`、`scripts/run_login.py`、`scripts/password_login_standalone.py`、`scripts/smoke_test.py` | `test_home.py`（首页）；`test_login.py`、`test_login_page_unit.py`（登录）；`test_main_cli.py`（主 CLI） | `2026-07-22-login-home-review.md` | 见第 5 节；均未开始/未执行。 |
+| 登录与首页 | `pages/Home.py`、`pages/app_common.py`、`pages/login*`、`scripts/main.py`、`scripts/run_login.py`、`scripts/password_login_standalone.py`、`scripts/smoke_test.py` | `test_home.py`（首页）；`test_login.py`、`test_login_page_unit.py`（登录）；`test_main_cli.py`（主 CLI） | `2026-07-22-login-home-review.md` | Task 3 已完成静态审查；安全等价离线子集 `10 passed, 1 deselected`，原样设备用例未运行，证据见第 10 节。 |
 | 商城只读浏览 | `pages/shop_*`、`flows/shop_home_*`、`scripts/run_shop_home.py`、`scripts/run_shop_business.py` | `test_shop_home_navigation.py`（商城导航/严格模式）；`test_shop_business_decomposition.py`（搜索/详情拆分门面） | `2026-07-28-mall-safe-decomposition-review.md`；`2026-07-28-shop-business-readonly-decomposition-review.md` | Task 4 已完成静态审查与聚焦离线验证；证据、缺陷和风险见第 11 节。 |
 | 商城订单边界 | `pages/mall_order_*`、`flows/mall_order_*`、`scripts/run_mall_order_flow.py` | `test_mall_order_address.py`（地址）；`test_mall_order_cart.py`（购物车）；`test_mall_order_checkout.py`（结算）；`test_mall_order_cli.py`（CLI/能力）；`test_mall_order_http.py`（HTTP）；`test_mall_order_safety.py`（安全边界）；`test_mall_order_types.py`（类型/金额） | `2026-07-22-mall-order-boundary-review.md`；`2026-07-28-mall-safe-decomposition-review.md` | Task 5 已完成静态审查与全部匹配离线测试；证据、缺陷和风险见第 12 节。 |
-| 外卖 | `pages/takeout_*`、`scripts/run_takeout_wangwang.py` | `test_takeout_cli.py`（CLI 组合）；`test_takeout_checkout_boundary.py`（结算/提交边界） | `2026-07-27-takeout-safe-checkout-review.md` | 见第 5 节；均未开始/未执行。 |
+| 外卖 | `pages/takeout_*`、`scripts/run_takeout_wangwang.py` | `test_takeout_cli.py`（CLI 组合）；`test_takeout_checkout_boundary.py`（结算/提交边界） | `2026-07-27-takeout-safe-checkout-review.md` | Task 6 已完成静态审查；按增量规则跳过聚焦 pytest，设备未执行，证据见第 13 节。 |
 | 跑腿 | `pages/transfer_page.py`、`scripts/run_transfer_business.py` | `test_transfer_page.py`（页面）；`test_transfer_cli.py`（CLI） | `2026-07-27-transfer-charge-review.md` | Task 7 已完成静态审查；按增量规则跳过聚焦测试，证据、缺陷和风险见第 14 节。 |
 | 充值 | `pages/charge_page.py` | `test_charge_page.py`（页面/提交边界） | `2026-07-27-transfer-charge-review.md` | Task 7 已完成静态审查；当前仅页面对象和离线测试，无生产调用方或独立安全 CLI，见第 14 节。 |
 | 配送辅助 | `pages/shipping_page.py` | 未发现匹配 `test_shipping_*.py` 的文件；首页调用链见第 14 节。 | 无独立报告 | Task 7 已完成静态审查；确认为首页活跃入口骨架，不代表完整海运业务覆盖。 |
@@ -114,10 +114,10 @@ a63e281 fix: guard mall structural fallback
 | 历史报告 | 对应提交/证据边界 | 当前相关差异 | 继承判断 | 必须复审的文件/范围 |
 | --- | --- | --- | --- | --- |
 | `2026-07-22-foundation-review.md` | 报告引入：`9dbb62c`；该报告自身说明当时无法取得 Git 基线，未声称设备回归。 | `commons/android_runtime.py` 已修改；并出现后续各域新入口。 | 仅作历史设计/测试背景，不能作当前兼容性结论；须增量复审。 | Task 2：全部 `commons/*.py`，重点 `commons/android_runtime.py` 及其新调用链。 |
-| `2026-07-22-login-home-review.md` | `fe1353a`（登录/首页/跑腿生命周期实现与报告）。 | 域内主登录/首页文件自此无直接修改；共享 `commons/android_runtime.py` 已变更。 | 未修改登录/首页代码的历史结论可作为线索；当前静态结论仍待 Task 3，且共享依赖须复审。 | Task 3：`pages/Home.py`、`pages/app_common.py`、`pages/login*`、`scripts/main.py`、`scripts/run_login.py`、`scripts/password_login_standalone.py`、`scripts/smoke_test.py`；并检查 Android runtime 影响。 |
+| `2026-07-22-login-home-review.md` | `fe1353a`（登录/首页/跑腿生命周期实现与报告）。 | 域内主登录/首页文件自此无直接修改；共享 `commons/android_runtime.py` 已变更。 | 未修改域内代码的历史结论只作线索；Task 3 已完成当前静态审查并运行安全等价离线子集（`10 passed, 1 deselected`），设备未执行，共享依赖按 Task 2/3 边界复审。 | Task 3 已完成：`pages/Home.py`、`pages/app_common.py`、`pages/login*`、相关 CLI/测试及 Android runtime 影响，详见第 10 节。 |
 | `2026-07-22-mall-order-boundary-review.md` | `c9d2bec`（商城订单边界报告/实现）。 | `scripts/run_mall_order_flow.py` 已修改并拆分；新增 `flows/mall_order_http.py`、`pages/mall_order_{cart,address,checkout}_mixin.py`；商城导航与 `commons/android_runtime.py` 亦变更。 | 原结论不能直接继承为当前全域结论，必须增量复审。 | Task 5：全部商城订单边界文件、`flows/mall_order_types.py`、相关 CLI/安全测试；Task 4 复审相邻导航链。 |
 | `2026-07-27-takeout-safe-checkout-review.md` | 实现：`3a10b81`；报告：`62b665d`。 | 外卖域文件及 `scripts/run_takeout_wangwang.py` 在此后无直接修改；公共基础层有修改。 | 外卖域内未变代码的离线/安全结论可作为可继承历史证据；不等于当前离线或设备兼容结论。 | Task 6：全部外卖文件、CLI、共享基础依赖；历史设备范围仍不继承。 |
-| `2026-07-27-transfer-charge-review.md` | 报告：`410b508`；引用实现：`fe1353a`（跑腿）与 `180b320`（充值）。 | `pages/transfer_page.py`、`scripts/run_transfer_business.py`、`pages/charge_page.py` 在此后无直接修改；共享 `commons/android_runtime.py` 已变更。 | 域内未变代码可继承为历史线索；当前静态/离线/设备结论均待 Task 7。报告已明确未重新运行设备，不能宣称兼容。 | Task 7：跑腿、充值和 `pages/shipping_page.py`，另复核共享 Android runtime 调用关系。 |
+| `2026-07-27-transfer-charge-review.md` | 报告：`410b508`；引用实现：`fe1353a`（跑腿）与 `180b320`（充值）。 | `pages/transfer_page.py`、`scripts/run_transfer_business.py`、`pages/charge_page.py` 在此后无直接修改；共享 `commons/android_runtime.py` 已变更。 | 域内未变代码只作历史线索；Task 7 已完成当前静态审查，聚焦 pytest 按增量与日志边界跳过，设备未执行。历史报告已明确未重新运行设备，仍不能宣称兼容。 | Task 7 已完成：跑腿、充值、`pages/shipping_page.py` 及共享 runtime 调用边界，详见第 14 节。 |
 | `2026-07-28-mall-safe-decomposition-review.md` | 报告提交：`d12b6d5`/`92221a7`；报告内保留设备运行是当时的商城导航命令。 | 之后新增商城搜索/详情 mixin，且 `pages/shop_home_page.py`、`scripts/run_mall_order_flow.py`、导航安全测试已修改。 | 历史只读设备运行仅说明当次路径；因后续代码变化，不能继承为当前商城浏览或订单相关的设备兼容性。 | Task 4/5：商城首页、业务门面、搜索/详情 mixin、订单 CLI、导航与安全测试。 |
 | `2026-07-28-shop-business-readonly-decomposition-review.md` | 报告最终提交：`a831d75`；保留设备运行：`a63e281`；报告明确 `e88173b`、`4224d71` 仅离线验证。 | 自 `a63e281` 起，`pages/shop_home_page.py`、`scripts/run_mall_order_flow.py`、`test_mall_order_safety.py`、`test_shop_business_decomposition.py`、`test_shop_home_navigation.py` 已变化；自最终报告 `a831d75` 到当前生产代码无差异。 | 最终报告的离线历史可作为当前树的背景；**设备证据不得提升为当前版本兼容性**，因为它早于 `e88173b`/`4224d71`，且未重跑设备。 | Task 4：严格只读导航、`pages/shop_home_page.py`、搜索/详情门面；Task 5：`scripts/run_mall_order_flow.py` 与能力边界。 |
 
@@ -467,7 +467,7 @@ $mallTests = Get-ChildItem testcases -Filter 'test_mall_order_*.py' |
 | --- | --- | --- |
 | P2 | 跑腿：`pages/transfer_page.py:102-179,192-211,239-248` | 地址必填只校验非空/非占位，未校验手机号格式、取收地址身份或表单快照；支付方式点击后未确认选中；余额结果用四个宽泛状态且未绑定订单号/金额。为每个阶段建立 typed snapshot，并逐步验证选择状态、订单身份、金额和最终支付状态。 |
 | P2 | 跑腿测试：`testcases/test_transfer_page.py:302-379,389-432`; `testcases/test_transfer_cli.py:41-46,134-260` | 页面测试覆盖点击前凭据校验和宽泛结果，但 CLI 没有孤立/冲突/capability 参数矩阵，也没有“PayActivity 不是支付成功”的负向用例。补纯 parser/validator 测试和订单身份状态机测试。 |
-| P3 | 跑腿三个生产文件 | 当前共 831 物理行、0 个固定等待、18 个宽泛异常；宽泛异常会把元素/会话/状态故障统一压成 `False`。按 action/locator/state 分类错误并保留脱敏诊断；复杂度计数不是缺陷数量。 |
+| P3 | 跑腿与充值三个生产文件 | 当前共 831 物理行、0 个固定等待、18 个宽泛异常；宽泛异常会把元素/会话/状态故障统一压成 `False`。按 action/locator/state 分类错误并保留脱敏诊断；复杂度计数不是缺陷数量。 |
 | P2 | 充值：`pages/charge_page.py:346-384`; `testcases/test_charge_page.py:286-291` | “重复账号”实际只比较供应商显示名，不读取当前账号值或已保存账号身份；测试也只覆盖同供应商。它可能误拒绝同供应商的不同账号，或无法证明真正重复账号被识别。先明确一供应商一账号还是账号值唯一规则，再用规范化 provider+account key 比较并补边界测试。 |
 | P2 | 充值：`pages/charge_page.py:310-332,386-453` | 保存、编辑、复制、删除及记录删除都是可变更动作，但只有页面 helper，没有独立 action/capability、确认前后状态或生产编排；也没有“选择已保存账号进入表单”的方法/测试。按具体动作拆 capability，绑定账号身份并确认最终状态。 |
 | P2 | 充值：`pages/charge_page.py:127-183,243-384` | 页面对象以内部 `filled_fields`/`selected_provider` 代表 UI 状态，输入后未回读字段，供应商点击后也未等待选中状态；静态证据不能证明 UI 拒绝输入或页面重载时不会使用陈旧状态。提交前从 UI 重建并核对完整快照。 |
