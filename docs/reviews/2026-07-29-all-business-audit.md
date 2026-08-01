@@ -1,31 +1,31 @@
 # 全业务自动化审查：基线、清单与证据矩阵
 
 日期：2026-07-29
-范围：`commons/`、`pages/`、`flows/`、`scripts/` 中的生产 Python 文件，以及 `testcases/test_*.py`。这是全量审查的清单、证据矩阵和增量结论文档；Task 2–8 的域内与跨域静态审查已完成，Task 9–10 的全量回归和最终收口尚待完成。
+范围：`commons/`、`pages/`、`flows/`、`scripts/` 中的生产 Python 文件，以及 `testcases/test_*.py`。这是全量审查的清单、证据矩阵和增量结论文档；Task 2–9 已完成，Task 10 的最终收口待完成。
 
 ## 1. 当前审查基线
 
 | 字段 | 值 |
 | --- | --- |
 | 分支 | `codex/mall-readonly-decomposition` |
-| 审查 SHA | `f4e37d8c6753729522ed2771095f859caf83b494` |
+| 审查 SHA | `d9f8c7f9c226399466efc554909e6e76f825b9f5` |
 | 审查时工作区状态 | `?? logs/` |
 | 运行时未跟踪目录 | `logs/` 是唯一预期的未跟踪运行时目录；不加入提交。 |
-| 本报告的审查状态 | Task 2–8 的域内与跨域静态审查已完成；Task 9–10 尚待完成。 |
+| 本报告的审查状态 | Task 2–9 已完成；Task 10 待完成。 |
 
 审查时最近十个提交：
 
 ```text
-f4e37d8 docs: make business audit incremental
-bed2de1 docs: plan all-business audit
-a831d75 docs: finalize mall decomposition verification
-4224d71 fix: preserve guarded mall recovery fallback
-e88173b fix: close navigation-only safety gaps
-46c5df3 docs: verify mall read-only decomposition
-a63e281 fix: guard mall structural fallback
-3832619 fix: fail closed in mall navigation verification
-0d999ac refactor: extract mall business detail
-26eab9a refactor: extract mall business search
+d9f8c7f docs: audit cross-domain security and coverage
+c95a7b4 docs: reconcile audit progress status
+6d8ac97 docs: audit transfer charge shipping domains
+783c75e docs: correct takeout preview boundary
+c36bf28 docs: audit takeout boundaries
+d454425 docs: audit mall order boundaries
+d5b3dc7 docs: audit mall read-only domain
+c54dd3b docs: audit login and home domain
+1324555 docs: clarify foundation audit evidence
+351dbf8 docs: audit foundation boundaries
 ```
 
 ## 2. 去重生产清单（69 个文件）
@@ -96,16 +96,16 @@ a63e281 fix: guard mall structural fallback
 
 | 域 | 静态审查 | 离线验证 | 真机无副作用 | 真实写入 |
 | --- | --- | --- | --- | --- |
-| 公共基础 | 已完成（含 3 个确认缺陷、3 个风险） | 已通过（21 passed） | 未执行 | 未授权未执行 |
-| 登录与首页 | 已完成（新增 1 个 P0、2 个 P1；2 个 P2 风险、1 个 P3 风险） | 10 passed，1 deselected（安全排除真实认证） | 未执行 | 未授权未执行 |
-| 商城只读浏览 | 已完成（3 个确认缺陷、3 个风险） | 已通过（55 passed） | 未执行（仅核对 `a63e281` 保留证据） | 未授权未执行 |
-| 商城订单边界 | 已完成（3 个 P0、2 个 P1；4 类风险） | 已通过（91 passed） | 未执行 | 未授权未执行 |
-| 外卖 | 已完成（2 个 P0、5 个 P1；3 类风险） | 按增量规则跳过（Task 9 全量 non-device 兜底） | 未执行 | 未授权未执行 |
-| 跑腿 | 已完成（1 个 P0、2 个 P1；3 类风险/缺口） | 按增量规则跳过（Task 9 全量 non-device 兜底） | 未执行 | 未授权未执行 |
-| 充值 | 已完成（2 个 P1；4 类风险/缺口；仅页面对象可达） | 按增量规则跳过（Task 9 全量 non-device 兜底） | 未执行 | 未授权未执行 |
-| 配送辅助 | 已完成（2 个 P1；3 类风险/缺口；活跃入口骨架） | 无独立测试；Task 9 全量 non-device 兜底 | 未执行 | 未授权未执行 |
+| 公共基础 | 已完成（含 3 个确认缺陷、3 个风险） | 当前全量通过（全局 `280 passed, 1 deselected`）；域内历史 `21 passed` | 未执行 | 未授权未执行 |
+| 登录与首页 | 已完成（新增 1 个 P0、2 个 P1；2 个 P2 风险、1 个 P3 风险） | 当前全量通过（全局 `280 passed, 1 deselected`，真实认证 device 用例排除）；域内历史 `10 passed, 1 deselected` | 未执行 | 未授权未执行 |
+| 商城只读浏览 | 已完成（3 个确认缺陷、3 个风险） | 当前全量通过（全局 `280 passed, 1 deselected`）；域内历史 `55 passed` | 未执行（仅核对 `a63e281` 保留证据） | 未授权未执行 |
+| 商城订单边界 | 已完成（3 个 P0、2 个 P1；4 类风险） | 当前全量通过（全局 `280 passed, 1 deselected`）；域内历史 `91 passed` | 未执行 | 未授权未执行 |
+| 外卖 | 已完成（2 个 P0、5 个 P1；3 类风险） | 当前全量通过（全局 `280 passed, 1 deselected`）；Task 6 聚焦测试曾按增量规则跳过 | 未执行 | 未授权未执行 |
+| 跑腿 | 已完成（1 个 P0、2 个 P1；3 类风险/缺口） | 当前全量通过（全局 `280 passed, 1 deselected`）；Task 7 聚焦测试曾按增量规则跳过 | 未执行 | 未授权未执行 |
+| 充值 | 已完成（2 个 P1；4 类风险/缺口；仅页面对象可达） | 当前全量通过（全局 `280 passed, 1 deselected`）；Task 7 聚焦测试曾按增量规则跳过 | 未执行 | 未授权未执行 |
+| 配送辅助 | 已完成（2 个 P1；3 类风险/缺口；活跃入口骨架） | 全量命令通过，但无独立测试；不能据此声明配送辅助已被动态覆盖 | 未执行 | 未授权未执行 |
 
-特别说明：Task 2–7 的域内静态审查和 Task 8 的跨域去重已完成；各域的聚焦测试运行或增量跳过证据见第 9–14 节，跨域结论见第 15 节。历史离线计数仅为审查线索；Task 9 的新鲜全量非真机回归才是当前树的最终离线结论。
+特别说明：Task 2–7 的域内静态审查、Task 8 的跨域去重和 Task 9 的当前树全量非真机回归均已完成；各域的聚焦测试运行或增量跳过证据见第 9–14 节，跨域结论见第 15 节，当前全量证据与真机资格见第 16 节。历史离线计数仅为审查线索，不与 Task 9 的当前全量结果合并。
 
 ## 6. 历史证据继承与增量复审边界
 
@@ -123,8 +123,8 @@ a63e281 fix: guard mall structural fallback
 
 ## 7. 已知证据缺口（非缺陷结论）
 
-- Task 2–8 已完成域内审查、跨域去重和文件/行号级证据固化；尚未执行 Task 9 的当前树全量 non-device 回归。
-- 各域聚焦 pytest 的运行或增量跳过不能替代 Task 9 的当前树全量 non-device 回归；所有历史通过数仅作背景。
+- Task 2–9 已完成域内审查、跨域去重、文件/行号级证据固化和当前树全量 non-device 回归；Task 10 尚待最终收口。
+- Task 9 当前全量结果为 `280 passed, 1 deselected in 3.86s`；各域历史聚焦通过数继续只作背景，不能与该全量计数相加。
 - 本任务未启动 Appium、未连接/操作设备，未执行真实写入或可能写入业务数据的命令。
 - 商城只读保留设备证据仅适用于提交 `a63e281` 的当次导航路径；后续 `e88173b` 和 `4224d71` 是离线验证，故不得声称当前设备兼容。
 - 外卖历史 `--checkout` 会加购/准备结算，可能留下购物车数据；它不属于严格无副作用验收路径。
@@ -414,7 +414,7 @@ $mallTests = Get-ChildItem testcases -Filter 'test_mall_order_*.py' |
 
 ### 测试决策与设备边界
 
-两份指定测试经静态核对仅使用 `RecordingCheckout`/Fake Manager 和 monkeypatch，不实例化真实 `DriverManager`、不连接设备或网络，不产生业务写入（`testcases/test_takeout_cli.py:37-86`; `testcases/test_takeout_checkout_boundary.py:6-139`）。测试只能证明桩化编排事件，不证明通用底栏 helper 在真实 UI 中的阶段语义、guard 前点击后仍处于 pre-order 状态或未创建订单。域内生产/测试自可绑定的 `62b665d` 后没有变化，历史证据可绑定 SHA，且本缺陷由 helper 标签集合、坐标 fallback、调用位置和缺失状态断言直接证实、不需要复现，因此按增量规则跳过聚焦 pytest；由 Task 9 新鲜全量 non-device 测试兜底。
+两份指定测试经静态核对仅使用 `RecordingCheckout`/Fake Manager 和 monkeypatch，不实例化真实 `DriverManager`、不连接设备或网络，不产生业务写入（`testcases/test_takeout_cli.py:37-86`; `testcases/test_takeout_checkout_boundary.py:6-139`）。测试只能证明桩化编排事件，不证明通用底栏 helper 在真实 UI 中的阶段语义、guard 前点击后仍处于 pre-order 状态或未创建订单。域内生产/测试自可绑定的 `62b665d` 后没有变化，历史证据可绑定 SHA，且本缺陷由 helper 标签集合、坐标 fallback、调用位置和缺失状态断言直接证实、不需要复现，因此按增量规则跳过聚焦 pytest；随后由第 16 节的 Task 9 新鲜全量 non-device 测试兜底。
 
 本 Task 的静态结论不证明真实 UI 定位、配送时间、余额/COD、订单详情、取消接口、Appium/ADB、设备、网络或当前 App 版本兼容性。真实写入保持“未授权未执行”。
 
@@ -480,7 +480,7 @@ $mallTests = Get-ChildItem testcases -Filter 'test_mall_order_*.py' |
 
 按增量规则没有运行三份指定 pytest。跑腿/充值三个生产文件和三份测试自可绑定报告 `410b508` 后均无差异，本次确认发现都可由动作顺序、返回状态和缺失校验直接静态证实，无需复现；Shipping 没有匹配测试。指定集合中的 `testcases/test_transfer_cli.py` 还会导入已初始化文件日志的模块，并主动读取该文件（`scripts/run_transfer_business.py:15-19`; `testcases/test_transfer_cli.py:5-10,24-38`; `commons/logger.py:51-64,84-91`），原样运行会创建或追加 `logs/`，不满足本 Task 的“不修改 logs”限制。
 
-因此本 Task 的 pytest 输出为“未运行；无输出”，由 Task 9 新鲜全量 non-device 回归兜底。历史报告中的 `36 passed`、`56 passed`、`157 passed, 1 deselected` 只属于 `410b508` 记录的当时离线证据，不是本次运行结果。
+因此本 Task 的 pytest 输出为“未运行；无输出”，随后由第 16 节的 Task 9 新鲜全量 non-device 回归兜底。历史报告中的 `36 passed`、`56 passed`、`157 passed, 1 deselected` 只属于 `410b508` 记录的当时离线证据，不是本次运行结果。
 
 本 Task 不证明跑腿表单/支付、Maya、充值供应商/账号/金额、配送页面定位、Appium/ADB、设备、网络或当前 App 版本兼容性。跑腿/充值订单、支付、账号保存/编辑及其他真实写入保持“未授权未执行”；充值在独立安全 CLI 和逐动作 capability 建立前明确为“不可直接真机验收”。
 
@@ -516,7 +516,7 @@ $mallTests = Get-ChildItem testcases -Filter 'test_mall_order_*.py' |
 | T8-5 金额表示、有限上限与业务快照 | P1 | 商城 `NaN/Infinity`、float/币种/库存快照缺口（第 12 节）；外卖无最大实付与本次订单身份（第 13 节）；跑腿无金额快照、充值仅非空金额（第 14 节）。 | 共享 Decimal/最小货币单位 parser 先修，业务域再定义币种、范围和 snapshot schema。 |
 | T8-6 坐标、ADB 与宽文本破坏性 fallback | P1 | OAuth/ADB 授权（第 10 节）；商城 Tab 坐标假阳性和领券风险（第 11 节）；外卖提交/配送/取消坐标与宽文本（第 13 节）；配送“海运”宽文本（第 14 节）。 | 只读导航与破坏性点击分层；后者未获具体 capability 时禁用坐标/ADB/宽文本。 |
 | T8-7 测试文案、表单/购物车污染与清理 | P1 | 商城默认加购/收藏（第 11 节）；商城地址/备注（第 12 节）；外卖默认 `test order`、加菜、券、备注、配送时间（第 13 节）；跑腿首个已保存地址、充值账号管理（第 14 节）。 | 数据域单独治理：唯一命名、幂等 setup/cleanup、账号与订单身份绑定；没有可验证 cleanup 前不开放真实写入。 |
-| T8-8 失败/冲突/安全边界与真机证据缺口 | P1 | 所有域均无当前真机证据；商城仅保留 `a63e281` 历史只读路径。外卖/跑腿参数冲突、订单身份与失败矩阵不足；充值只有 Fake Driver；配送无独立测试（第 10–14 节）。 | 测试/证据治理；Task 9 先给当前树全量 non-device 结论，真机仅在默认无写入且逐动作授权后执行。 |
+| T8-8 失败/冲突/安全边界与真机证据缺口 | P1 | 所有域均无当前真机证据；商城仅保留 `a63e281` 历史只读路径。外卖/跑腿参数冲突、订单身份与失败矩阵不足；充值只有 Fake Driver；配送无独立测试（第 10–14 节）。 | 测试/证据治理；Task 9 当前树全量 non-device 结论见第 16 节，真机仅在默认无写入且逐动作授权后执行。 |
 
 因此，去重后主题数为 **8**（P0 主导 3 项，P1 主导 5 项）；这个计数与第 9–14 节的域内原始缺陷/风险计数分开。
 
@@ -535,7 +535,7 @@ $mallTests = Get-ChildItem testcases -Filter 'test_mall_order_*.py' |
 
 ### 公开动作覆盖矩阵
 
-“有”只表示当前文件存在静态映射；“部分/缺失”是覆盖 finding，不是生产故障证明。历史数字、Task 2–7 当前聚焦证据和 Task 9 尚未运行的全量证据严格分开。
+“有”只表示当前文件存在静态映射；“部分/缺失”是覆盖 finding，不是生产故障证明。截至 Task 8，历史数字、Task 2–7 当前聚焦证据和当时尚未运行的 Task 9 全量证据严格分开；随后全量结果见第 16 节。
 
 | 域/主要公开动作 | 主路径测试 | 失败路径测试 | 参数冲突测试 | 安全边界测试 | 真机证据 |
 | --- | --- | --- | --- | --- | --- |
@@ -554,10 +554,72 @@ $mallTests = Get-ChildItem testcases -Filter 'test_mall_order_*.py' |
 2. **P0，业务动作 capability 拆分**：按域分别拆分 cart/address/create/pay/cancel/message/OAuth/Maya；一个 capability 不再隐式授权下一阶段。
 3. **P0/P1，状态断言层**：用 phase-specific control 和 typed snapshot 绑定 Activity/页面标识、订单号、商品/地址/表单、金额和最终状态；坐标或点击无异常不能代表成功。
 4. **P1，共享基础治理**：修复 Driver 创建后泄漏，收敛冒烟直连 lifecycle；统一 Decimal/币种 parser；改用结构化脱敏日志、属性级 XML 清洗和安全截图策略。
-5. **P1，数据污染与覆盖**：移除生产 `test order` 默认，为每个写动作建立唯一数据、身份绑定和可验证 cleanup；先补失败/冲突/安全边界 Fake 测试，再由 Task 9 运行当前树全量 non-device 回归。
+5. **P1，数据污染与覆盖**：移除生产 `test order` 默认，为每个写动作建立唯一数据、身份绑定和可验证 cleanup；先补失败/冲突/安全边界 Fake 测试。Task 9 的当前树全量 non-device 回归已完成，见第 16 节。
 
 ### 限制与最终边界
 
 - 本节是静态跨域审查；“缺失测试”、“无引用”、“原始异常可能含敏感值”和“截图未像素脱敏”均不表示已复现生产泄露或故障。
 - 全仓文本引用搜索无法排除手工 import、反射、外部消费者或直接 CLI 调用；所以孤儿结论只说“仓内未见调用方”，不给出删除授权。
-- Task 9 未运行，Task 10 未收口；本 Task 没有当前真机、Appium、ADB、网络、真实认证或业务写入结论。历史证据仍仅在第 6 节的绑定 SHA/路径内有效。
+- 截至本节（Task 8）尚未运行 Task 9，Task 10 也未收口；随后完成的 Task 9 证据见第 16 节。本节没有当前真机、Appium、ADB、网络、真实认证或业务写入结论，历史证据仍仅在第 6 节的绑定 SHA/路径内有效。
+
+## 16. Task 9：全量离线回归、编译与安全真机资格门
+
+### 当前树与完整命令
+
+- 运行基线：`d9f8c7f9c226399466efc554909e6e76f825b9f5`。
+- 本节只产生当前树的新鲜离线证据和逐域设备资格；未修改生产代码、测试或配置。
+- `pytest` 允许自行创建或追加未跟踪 `logs/`；本 Task 未读取、手工修改、删除或暂存其中内容。
+
+全量非真机回归的完整命令：
+
+```powershell
+& 'C:\Users\18718\Desktop\appium_project\venv\Scripts\python.exe' `
+  -m pytest -m 'not device' -q
+```
+
+原始控制台摘要：
+
+```text
+........................................................................ [ 25%]
+........................................................................ [ 51%]
+........................................................................ [ 77%]
+................................................................         [100%]
+280 passed, 1 deselected in 3.86s
+```
+
+进程退出码为 `0`，失败数为 `0`。`1 deselected` 是被 `not device` 明确排除的设备用例；该结果不执行或证明真实认证和设备兼容性。
+
+全部 Python 内存编译的完整命令：
+
+```powershell
+& 'C:\Users\18718\Desktop\appium_project\venv\Scripts\python.exe' -c `
+  "from pathlib import Path; files=sorted(p for p in Path('.').rglob('*.py') if '__pycache__' not in p.parts); [compile(p.read_text(encoding='utf-8-sig'), str(p), 'exec') for p in files]; print(f'compiled={len(files)}')"
+```
+
+精确输出为 `compiled=96`，进程退出码为 `0`。该命令使用内存 `compile()`，没有用 `compileall` 或 `py_compile` 写入 `__pycache__`。
+
+### 8 域真机资格矩阵
+
+每域只选择一个允许值。这里的“入口”是被审查的候选入口，不表示已运行。
+
+| 域 | 单一资格 | 候选入口 | 当前依据 | 禁止动作 | 重新开放条件 |
+| --- | --- | --- | --- | --- | --- |
+| 公共基础 | 无独立安全入口，禁止执行 | 共享 `DriverManager`、Android runtime、诊断与等待组件；无独立设备验收 CLI | Task 2 确认 Driver 创建后失败可能遗留 session，logger/XML 诊断存在敏感片段脱敏缺口；这些组件只能被业务入口间接触发 | 禁止为“验证基础层”而启动 Appium session、探测 ADB、启动 Activity 或采集真实页面诊断 | 建立只读、无业务导航的独立验收入口；修复 session 清理和诊断脱敏，并覆盖失败清理后再评估 |
+| 登录与首页 | 静态审查发现门禁缺口，禁止执行 | `scripts/main.py`、`scripts/run_login.py`、`scripts/password_login_standalone.py`、`scripts/smoke_test.py` | Task 3 确认 device 改密用例可被默认收集、smoke 失败可报成功、Home 目标/恢复状态可假阳性；OAuth 还保留 ADB/“同意”授权 fallback | 禁止真实登录、短信/语音验证码、OAuth 授权、改密、客服消息、ADB 和宽泛同意点击 | 默认排除 device；按认证动作拆一次性授权；移除/显式授权 ADB fallback；补目标页与恢复状态 fail-closed 断言 |
+| 商城只读 | 静态审查发现门禁缺口，禁止执行 | `python -m scripts.run_mall_order_flow --verify-navigation-only` | strict guard 只覆盖 mall-tab 的坐标/ADB fallback；搜索和详情路径仍含多处 `mobile: clickGesture` 坐标 fallback，无法证明坐标/ADB fallback 已彻底关闭；`a63e281` 仅是历史单次设备证据 | 禁止加购、收藏、领券、复制分享、IM、结算、订单、支付、地址、取消，以及任何搜索/详情坐标 fallback | 用同一严格 guard 覆盖搜索、结果卡片、详情与回退的全部坐标/ADB 路径；增加只读 helper 写动作黑名单、逐步目标状态和失败回退测试后再申请 |
+| 商城订单 | 静态审查发现门禁缺口，禁止执行 | `scripts/run_mall_order_flow.py` 的购物车、地址、结算、订单与异常流 | Task 5 确认创建 capability 隐含支付、断网异常流无订单/网络 capability 即尝试提交、`NaN/Infinity` 可绕过上限，默认 `buy_now` 和孤立参数还会创建 Driver | 禁止加购/删除购物车、选择/新增/编辑/复制地址、结算表单、创建/取消订单、支付、IM、网络切换和 HTTP 钩子 | 逐动作拆 capability；Driver 前拒绝无动作/孤立参数/非有限金额；绑定订单、金额和状态快照；异常流独立授权且验证网络恢复 |
+| 外卖 | 静态审查发现门禁缺口，禁止执行 | `scripts/run_takeout_wangwang.py` | Task 6 确认 checkout guard 前的通用底栏 helper 可匹配提交/支付且有坐标 fallback；购物车、表单、创建、支付和取消授权聚合，订单身份未绑定 | 禁止加菜/购物车、券、备注、通知、配送时间、地址、提交/支付/取消、密码和任何破坏性坐标/宽文本 fallback | 拆分逐动作 capability 和有限金额上限；使用 phase-specific 控件；绑定本次订单身份；所有显式配送/取消条件 fail closed；未经授权彻底禁用坐标 fallback |
+| 跑腿 | 无独立安全入口，禁止执行 | 仓库存在 `python -m scripts.run_transfer_business --action menus` CLI | `--action menus` 本身使用 ID/Activity 往返，但入口没有建立或校验 RunnerHome 初始状态的独立安全导航，也没有失败后的保证回退门禁；默认启动策略还可能把 App 带回 MainActivity | 禁止表单、已保存地址选择、创建订单、余额支付、支付密码、Maya 登录/支付；本 Task 也不运行菜单 CLI | 建立默认无写入的 RunnerHome 导航与初始状态断言；成功和每个失败分支都保证回退；Driver 前校验孤立/冲突参数并保持坐标/ADB fallback 关闭 |
+| 充值 | 无独立安全入口，禁止执行 | 仅 `pages/charge_page.py` 页面对象和 Fake Driver 测试，无生产 CLI/调用方 | Task 7 确认无生产调用方或独立安全 CLI；金额仅非空校验，创建以点击成功当结果，保存账号等写动作无 capability/清理契约 | 禁止充值/缴费创建订单、保存/编辑/复制/删除账号、记录删除及任何真实账号/金额输入 | 先建立默认无写入的生产入口；为每个写动作增加 capability、有限金额/币种、页面回读、目标状态和可验证清理计划 |
+| 配送辅助 | 静态审查发现门禁缺口，禁止执行 | Home 金刚区“海运/海运物流”映射到 `ShippingPage`；无独立 CLI | Task 7 确认仅为活跃骨架：宽文本可在首页残留时假阳性，Home 还忽略 `run_main_flow()` 的失败返回；无独立测试 | 禁止把点击入口当业务成功，禁止港口/货物/运费/运单/提交动作及坐标/宽文本破坏性 fallback | 增加独立只读入口、目的 Activity/唯一 ID/专属状态组合断言、Home 返回值传播、失败诊断和 Fake Driver 负向测试 |
+
+没有域通过“可执行无副作用真机验证”闸；也没有域拥有可提升为当前版本证据的真机材料。因此未使用“已有当前版本证据，无需重复”和“需要用户对持久化动作单独授权”作为任何域的最终单一资格。持久化动作仍需单独授权，但现有静态门禁缺口必须先修，授权本身不能越过 fail-closed 要求。
+
+### 设备决策、实际证据与限制
+
+- 主控制器在收到离线结果和上述矩阵后明确同意本 Task 不执行设备命令。
+- **本 Task 未执行设备命令**：没有运行 `adb`、Appium 状态/启动/重配置命令或任何业务脚本，也没有连接、点击或改变设备/App 状态。
+- 未执行设备命令不是任务失败；原因是 8 个域均未达到“可执行无副作用真机验证”的完整安全门，而不是离线回归失败。
+- 当前 `280 passed, 1 deselected` 与 `compiled=96` 只证明当前树已收集的非 device 测试和 Python 源码编译通过；不证明真实 UI 定位、Appium/ADB、设备、网络、认证或当前 App 版本兼容。
+- 历史 `a63e281` 商城只读材料继续只绑定当次路径，不能升级为当前版本设备证据；Task 2–7 的历史聚焦计数也不能与本节 `280` 相加。
+- `logs/` 保持未跟踪且不纳入提交；Task 10 仍待完成。
