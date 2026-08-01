@@ -1,7 +1,7 @@
 # 全业务自动化审查：基线、清单与证据矩阵
 
 日期：2026-07-29
-范围：`commons/`、`pages/`、`flows/`、`scripts/` 中的生产 Python 文件，以及 `testcases/test_*.py`。这是全量审查的清单、证据矩阵和增量结论文档；Task 2–7 的域内静态审查已完成，Task 8–10 的跨域审查、全量回归和最终收口尚待完成。
+范围：`commons/`、`pages/`、`flows/`、`scripts/` 中的生产 Python 文件，以及 `testcases/test_*.py`。这是全量审查的清单、证据矩阵和增量结论文档；Task 2–8 的域内与跨域静态审查已完成，Task 9–10 的全量回归和最终收口尚待完成。
 
 ## 1. 当前审查基线
 
@@ -11,7 +11,7 @@
 | 审查 SHA | `f4e37d8c6753729522ed2771095f859caf83b494` |
 | 审查时工作区状态 | `?? logs/` |
 | 运行时未跟踪目录 | `logs/` 是唯一预期的未跟踪运行时目录；不加入提交。 |
-| 本报告的审查状态 | Task 2–7 的域内静态审查已完成；Task 8–10 尚待完成。 |
+| 本报告的审查状态 | Task 2–8 的域内与跨域静态审查已完成；Task 9–10 尚待完成。 |
 
 审查时最近十个提交：
 
@@ -105,7 +105,7 @@ a63e281 fix: guard mall structural fallback
 | 充值 | 已完成（2 个 P1；4 类风险/缺口；仅页面对象可达） | 按增量规则跳过（Task 9 全量 non-device 兜底） | 未执行 | 未授权未执行 |
 | 配送辅助 | 已完成（2 个 P1；3 类风险/缺口；活跃入口骨架） | 无独立测试；Task 9 全量 non-device 兜底 | 未执行 | 未授权未执行 |
 
-特别说明：Task 2–7 的域内静态审查均已完成；各任务的聚焦测试运行或增量跳过证据见第 9–14 节。历史离线计数仅为审查线索；Task 9 的新鲜全量非真机回归才是当前树的最终离线结论。
+特别说明：Task 2–7 的域内静态审查和 Task 8 的跨域去重已完成；各域的聚焦测试运行或增量跳过证据见第 9–14 节，跨域结论见第 15 节。历史离线计数仅为审查线索；Task 9 的新鲜全量非真机回归才是当前树的最终离线结论。
 
 ## 6. 历史证据继承与增量复审边界
 
@@ -123,7 +123,7 @@ a63e281 fix: guard mall structural fallback
 
 ## 7. 已知证据缺口（非缺陷结论）
 
-- Task 2–7 已完成域内静态审查并记录文件/行号级结论；尚未执行 Task 8 的跨域去重与 Task 9 的当前树全量 non-device 回归。
+- Task 2–8 已完成域内审查、跨域去重和文件/行号级证据固化；尚未执行 Task 9 的当前树全量 non-device 回归。
 - 各域聚焦 pytest 的运行或增量跳过不能替代 Task 9 的当前树全量 non-device 回归；所有历史通过数仅作背景。
 - 本任务未启动 Appium、未连接/操作设备，未执行真实写入或可能写入业务数据的命令。
 - 商城只读保留设备证据仅适用于提交 `a63e281` 的当次导航路径；后续 `e88173b` 和 `4224d71` 是离线验证，故不得声称当前设备兼容。
@@ -483,3 +483,81 @@ $mallTests = Get-ChildItem testcases -Filter 'test_mall_order_*.py' |
 因此本 Task 的 pytest 输出为“未运行；无输出”，由 Task 9 新鲜全量 non-device 回归兜底。历史报告中的 `36 passed`、`56 passed`、`157 passed, 1 deselected` 只属于 `410b508` 记录的当时离线证据，不是本次运行结果。
 
 本 Task 不证明跑腿表单/支付、Maya、充值供应商/账号/金额、配送页面定位、Appium/ADB、设备、网络或当前 App 版本兼容性。跑腿/充值订单、支付、账号保存/编辑及其他真实写入保持“未授权未执行”；充值在独立安全 CLI 和逐动作 capability 建立前明确为“不可直接真机验收”。
+
+## 15. Task 8：跨业务安全、数据污染、日志和覆盖缺口审查
+
+### 基线、方法与计数边界
+
+- 审查基线为 `c95a7b490724a159383f85897e0a49e8da153ada`。扫描范围是 69 个生产 Python 文件、24 个 `testcases/test_*.py`、`pytest.ini`和 `.gitignore`；根目录不存在 `.env.example`，故该项只能记为配置/示例缺口，不是生产凭据泄露证据。
+- 只使用 `rg`、Git 只读命令和 Python AST 纯读取统计：扫描敏感命名/赋值、环境 fallback、CLI 默认值、长数字、6 位码、`allow_*`/动作授权、日志/异常/响应、screenshot/XML/page source、重复实现、全仓引用与测试函数表面。未读取 `logs/`，未运行 pytest、Appium、ADB、设备、网络或业务脚本。
+- Task 2–7 原始计数保持不变。本节的“去重后主题数”为 **8**；“Task 8 新增确认生产缺陷”为 **0**。下表的确认项全部复用第 9–14 节，新扫描信号只按风险、数据/示例或覆盖缺口记录。
+
+### 敏感默认值、日志与诊断分类
+
+| 分类 | 扫描结果与精确证据 | 结论 |
+| --- | --- | --- |
+| 生产确认缺陷（复用） | logger 的空格分隔 secret 绕过与 XML 敏感片段绕过均见第 9 节 `commons/logger.py:15-18,36-48` 和 `commons/diagnostics.py:15-22,45-49,75-77`；商城地址原值与 mock 支付完整响应日志见第 12 节及 `pages/mall_order_address_mixin.py:592,662-668`、`pages/mall_order_checkout_mixin.py:802-819`。 | 不重复计数；共享 logger/XML 根因影响登录、首页、商城、外卖、跑腿和配送诊断。 |
+| 生产风险/待确认 | `capture_failure()` 对 XML 调用 `sanitize_xml()`，但对 PNG 直接 `driver.save_screenshot()`（`commons/diagnostics.py:45-77`）；首页失败和商城导航会调用它（`pages/Home.py:780-815`; `scripts/run_mall_order_flow.py:587-603`）。静态证据证明截图没有像素级脱敏，但没有证明当时画面一定含凭据，故不升级为已发生泄露。多个域仍直接记录 `%s` 原始异常，例如 `scripts/run_mall_order_flow.py:718,1089,1189-1196`、`scripts/run_shop_home.py:99`和 `scripts/run_shop_business.py:141`；异常是否含敏感值需运行时证据。 | P1 诊断边界风险；截图应限定安全页面/遮罩敏感区，原始异常改为类型+白名单字段。 |
+| 环境与 CLI 默认 | 登录、跑腿凭据及商城地址的环境 fallback 为空（`pages/login/data.py:10-38`; `scripts/run_transfer_business.py:37-41`; `scripts/run_mall_order_flow.py:101-105`）；未命中固定生产密码/token/手机号。未命中 `default=True` 的 CLI capability 或 `allow_*=True`；第 10–14 节已确认的问题是缺 capability、动作与 capability 聚合，而不是布尔默认真。 | 正向证据，不消除已有授权缺陷。`.env.example` 缺失使必需变量、敏感值不入库和安全默认无统一示例契约。 |
+| 测试数据 | 10–13 位数字在生产文件命中 0；测试中有 5 个唯一长数字样例（`test_diagnostics.py:11,51`; `test_charge_page.py:130,218,321-322,348,406-410`）。6 位 `123456` 仅在 logger/diagnostics 脱敏测试（`test_logger.py:45-51`; `test_diagnostics.py:11,52`）；`legacy-default` 仅是外卖测试桩默认密码（`test_takeout_checkout_boundary.py:57-59,103-106`，第 13 节 P1）。 | 测试数据，不是生产泄露；legacy 密码仍应删除以防回流。 |
+| 生产测试文案/数据污染 | 商城订单和外卖共同把 `DEFAULT_REMARK_TEXT = "test order"` 设为业务表单默认（`scripts/run_mall_order_flow.py:100,823-824`; `pages/takeout_checkout_mixin.py:34,2423-2487,2715-2773`; `scripts/run_takeout_wangwang.py:140-141`）。第 12 节确认商城会操作结算表单，第 13 节已将外卖默认备注和购物车/表单变更记入 P1。 | 确认“测试文案进入生产默认”，作为已有数据污染主题的跨域实例；不另计新生产缺陷，也不声称一定已持久化。 |
+| 文档/示例与无害常量 | `.invalid` HTTP URL、logger 脱敏样例、充值 Fake Driver 号码/账号、定位器中“验证码/地址/账号”文案均没有生产凭据赋值或默认授权证据。 | 示例/测试/定位常量，禁止误报。 |
+
+### 跨域去重主题与优先级
+
+去重规则是“共享先决条件或相同失败机制为一个根因，域内实例保留”；不把同一个日志脱敏缺陷按受影响域数重复计数，也不把每个缺测试单元格计为生产故障。
+
+| 主题 | 优先级 | 已确认的域内实例/章节 | 治理拆分 |
+| --- | --- | --- | --- |
+| T8-1 默认副作用与 capability 聚合 | P0 | 登录 device 用例默认可收集（第 10 节）；商城浏览默认加购/收藏/分享/IM/结算（第 11 节）；商城创建隐含支付（第 12 节）；外卖结算/提交/支付/取消聚合（第 13 节）；跑腿创建/余额支付/Maya 聚合（第 14 节）。 | 先建共享 action-capability 契约，再按 cart/address/create/pay/cancel/message/auth 拆一次性权能。 |
+| T8-2 Driver 创建前的默认动作与参数语义 | P0 | 商城浏览无参即写入（第 11 节）；商城订单默认 `buy_now`和孤立子参数（第 12 节）；外卖 checkout-only 参数被静默忽略（第 13 节）；跑腿凭据/支付组合在 Driver 后才失败（第 14 节）。 | 共享纯 parser/validator 约束“显式 action—所属子参数—所需 capability”，无效组合统一在 Driver 前退出 2。 |
+| T8-3 阶段、订单身份与目标状态未绑定 | P0/P1 | Home/商城坐标点击即成功（第 10–11 节）；商城 mock 支付任意 JSON/宽泛订单页即成功（第 12 节）；外卖旧订单取消入口可冒充手工支付（第 13 节）；跑腿 `PayActivity`、充值点击和配送宽文本假阳性（第 14 节）。 | 独立状态断言层；每步绑定 action、阶段、订单号、金额、商品/表单快照和明确最终状态。 |
+| T8-4 日志、XML、screenshot 与原始异常的脱敏边界 | P1 | 第 9 节 logger/XML 确认缺陷；第 12 节地址/完整响应日志；本节确认 screenshot 未像素脱敏和多域原始异常的静态风险。 | 共享基础先修：结构化白名单日志、属性级 XML 改写、安全截图策略和敏感页面禁拍。 |
+| T8-5 金额表示、有限上限与业务快照 | P1 | 商城 `NaN/Infinity`、float/币种/库存快照缺口（第 12 节）；外卖无最大实付与本次订单身份（第 13 节）；跑腿无金额快照、充值仅非空金额（第 14 节）。 | 共享 Decimal/最小货币单位 parser 先修，业务域再定义币种、范围和 snapshot schema。 |
+| T8-6 坐标、ADB 与宽文本破坏性 fallback | P1 | OAuth/ADB 授权（第 10 节）；商城 Tab 坐标假阳性和领券风险（第 11 节）；外卖提交/配送/取消坐标与宽文本（第 13 节）；配送“海运”宽文本（第 14 节）。 | 只读导航与破坏性点击分层；后者未获具体 capability 时禁用坐标/ADB/宽文本。 |
+| T8-7 测试文案、表单/购物车污染与清理 | P1 | 商城默认加购/收藏（第 11 节）；商城地址/备注（第 12 节）；外卖默认 `test order`、加菜、券、备注、配送时间（第 13 节）；跑腿首个已保存地址、充值账号管理（第 14 节）。 | 数据域单独治理：唯一命名、幂等 setup/cleanup、账号与订单身份绑定；没有可验证 cleanup 前不开放真实写入。 |
+| T8-8 失败/冲突/安全边界与真机证据缺口 | P1 | 所有域均无当前真机证据；商城仅保留 `a63e281` 历史只读路径。外卖/跑腿参数冲突、订单身份与失败矩阵不足；充值只有 Fake Driver；配送无独立测试（第 10–14 节）。 | 测试/证据治理；Task 9 先给当前树全量 non-device 结论，真机仅在默认无写入且逐动作授权后执行。 |
+
+因此，去重后主题数为 **8**（P0 主导 3 项，P1 主导 5 项）；这个计数与第 9–14 节的域内原始缺陷/风险计数分开。
+
+### 重复实现、孤儿与兼容入口
+
+| 项目 | 全仓引用/调用链证据 | 判定 |
+| --- | --- | --- |
+| Driver lifecycle 双路实现 | 共享实现为 `commons/driver.py:38-88`，大多数 CLI 通过 `DriverManager()` 创建/关闭（例如 `scripts/run_mall_order_flow.py:1110,1194`）；`scripts/smoke_test.py:14-63,70-116` 两处直接 `webdriver.Remote()`/`quit()`，且活跃 `smoke_test()` 由 `scripts/main.py:9,39-43` 调用。 | 确认重复，且冒烟路径绕过共享 runtime/lifecycle；不是孤儿。 |
+| ADB/坐标导航分散 | 共享 Activity/ADB 在 `commons/android_runtime.py:13-72`，商城 Tab 另有直接 ADB tap（`pages/shop_home_page.py:853-881`），登录 OAuth 另有两组 ADB tap（`pages/login/mixins/oauth_mixin.py:1432-1505`），外卖提交/取消则分布多组 `mobile: clickGesture`（第 13 节精确范围）。 | 确认重复 fallback 表面，但语义不同；不能因“重复”直接删除，应统一 capability/目标状态约束。 |
+| 金额解析重复 | `flows/mall_order_types.py:35-70` 的 `parse_money()` 有商城订单生产/测试调用；`pages/shop_business_detail_mixin.py:174-204,402-409`、`pages/shop_mall_product_detail_page.py:171-192`和 `pages/takeout_checkout_mixin.py:1271-1313` 各自使用正则+`float`。 | 确认 4 个实现表面；都有生产调用，不是孤儿，合并前须保留币种/页面格式差异。 |
+| 订单/支付状态重复 | 商城标志为 `pages/mall_order_checkout_mixin.py:55-60,752-840`，外卖以“取消订单”为支付/取消入口（`pages/takeout_checkout_mixin.py:2805-2822`; `pages/takeout_cancel_order_mixin.py:769-974`），跑腿使用 `PayActivity`/“订单详情”/非“待付款”（`pages/transfer_page.py:181-248`）。 | 确认跨域重复断言机制；当前为各域活跃链，不可直接删除。 |
+| `ChargePage` | 全仓 Python 引用只命中定义 `pages/charge_page.py:16`和 `testcases/test_charge_page.py`；没有生产 import、CLI 或 Home 分发（第 14 节已确认）。 | 生产调用孤儿/只有 Fake Driver 测试；可能是待接入页面对象，“无调用方”不等于可删除。 |
+| `test_with_dynamic_config()` | 全仓（排除 `logs/`、Git 内部和本计划 ledger）只命中 `scripts/smoke_test.py:70` 定义与 `scripts/smoke_test.py:122` 被注释的调用。 | 确认无直接生产/测试调用的 legacy 入口；仍保留手工 import/反射可能，不直接宣称可删除。 |
+| `ShippingPage` | `pages/Home.py:18,64-72,632-642` 导入、映射并调用 `pages/shipping_page.py:11,56-65`。 | 活跃首页入口骨架，不是孤儿；TODO 不等于完整海运覆盖。 |
+| `pages/login_page.py` | 是显式兼容重导出（`pages/login_page.py:1-8`）；`scripts/run_login.py:6`、`scripts/password_login_standalone.py:26`和 `testcases/test_login.py:8` 仍从该路径导入。 | 兼容包装有活跃调用方，不是孤儿，不应在未迁移调用方时删除。 |
+
+### 公开动作覆盖矩阵
+
+“有”只表示当前文件存在静态映射；“部分/缺失”是覆盖 finding，不是生产故障证明。历史数字、Task 2–7 当前聚焦证据和 Task 9 尚未运行的全量证据严格分开。
+
+| 域/主要公开动作 | 主路径测试 | 失败路径测试 | 参数冲突测试 | 安全边界测试 | 真机证据 |
+| --- | --- | --- | --- | --- | --- |
+| 公共基础：config/Driver/wait/diagnostics | 有：6 份单测，Task 2 聚焦 `21 passed` | 部分：Remote 创建失败、证据不可用、wait 超时；缺创建后失败/并发/quit 失败 | 缺失：未知 config override/空必需值 | 部分：只测 `key=value` 和部分 XML，缺空格 secret/敏感片段/截图 | 未执行 |
+| 登录与首页：dispatch/密码/SMS/OAuth/Home | 部分：注入 Driver 和 dispatch，Task 3 `10 passed, 1 deselected` | 部分：缺 Home 目标/恢复失败、真实认证失败 | 部分：测显式 method，未覆盖发码/OAuth/破坏性授权矩阵 | 缺口：`device` 未默认排除，ADB/同意 fallback 无边界测试 | 未执行；真实改密用例已安全排除 |
+| 商城只读：导航/搜索/分类/详情 | 有：导航+拆分 55 项聚焦通过 | 有：严格导航、搜索/开详情短路 | 缺失：两个 CLI 默认/动作冲突 | 缺失：只读 helper 写动作黑名单和领券负向 | 仅 `a63e281` 历史只读路径；当前未执行 |
+| 商城订单：购物车/地址/结算/创建/支付/取消/消息/HTTP | 有：7 份测试、Task 5 `91 passed` | 部分：金额上限、订单号缺失、HTTP/JSON/状态失败 | 部分：既有 capability 矩阵；缺默认 `buy_now`、孤立子参数、`nan/inf` | 部分：导航/购物车/地址/创建边界；缺独立支付/网络 capability 和敏感日志 | 未执行 |
+| 外卖：导航/加菜/结算/配送/提交/支付/取消 | 部分：两份 Fake 测试覆盖主编排 | 部分：手工支付超时；缺阶段控件、配送、订单身份和取消 fail-closed | 部分：只测 submit 依赖 checkout；checkout-only 子参数未测 | 缺口：无逐动作 capability/最大实付/坐标禁用边界 | 当前未执行；历史报告不提升为当前证据 |
+| 跑腿：菜单/表单/创建/余额/Maya | 部分：菜单、表单、支付假 Driver 主路径 | 部分：占位地址、缺凭据、待付款拒绝 | 缺口：无 Driver 前孤立/冲突/capability 矩阵 | 部分：测日志不泄凭据；缺创建/支付/Maya 独立 capability、金额/订单身份 | 未执行 |
+| 充值：充值/缴费/账号/记录/创建 | 有：36 个 Fake Driver 测试 | 部分：字段/照片/provider/toggle 失败；缺创建后业务状态 | 无生产 CLI，无法建立 CLI 冲突覆盖 | 缺口：金额边界、逐动作 capability、数据清理 | 未执行；无安全生产入口 |
+| 配送辅助：首页海运可达性 | 缺失：无 `test_shipping_*.py`或 Home shipping 分发测试 | 缺失：无首页残留文案/业务返回 False/异常诊断负向 | 无业务 action/capability 表面 | 缺失：仅宽文本骨架，无提交边界 | 未执行 |
+
+### P0/P1 修复顺序与后续治理计划
+
+1. **P0，共享安全契约先行**：默认排除 device/真实认证；建立纯 `validate_args()` 与 action—capability 映射；在任何 Driver/网络/坐标动作前拒绝无 action、孤立参数、缺 capability 和非有限金额。
+2. **P0，业务动作 capability 拆分**：按域分别拆分 cart/address/create/pay/cancel/message/OAuth/Maya；一个 capability 不再隐式授权下一阶段。
+3. **P0/P1，状态断言层**：用 phase-specific control 和 typed snapshot 绑定 Activity/页面标识、订单号、商品/地址/表单、金额和最终状态；坐标或点击无异常不能代表成功。
+4. **P1，共享基础治理**：修复 Driver 创建后泄漏，收敛冒烟直连 lifecycle；统一 Decimal/币种 parser；改用结构化脱敏日志、属性级 XML 清洗和安全截图策略。
+5. **P1，数据污染与覆盖**：移除生产 `test order` 默认，为每个写动作建立唯一数据、身份绑定和可验证 cleanup；先补失败/冲突/安全边界 Fake 测试，再由 Task 9 运行当前树全量 non-device 回归。
+
+### 限制与最终边界
+
+- 本节是静态跨域审查；“缺失测试”、“无引用”、“原始异常可能含敏感值”和“截图未像素脱敏”均不表示已复现生产泄露或故障。
+- 全仓文本引用搜索无法排除手工 import、反射、外部消费者或直接 CLI 调用；所以孤儿结论只说“仓内未见调用方”，不给出删除授权。
+- Task 9 未运行，Task 10 未收口；本 Task 没有当前真机、Appium、ADB、网络、真实认证或业务写入结论。历史证据仍仅在第 6 节的绑定 SHA/路径内有效。
