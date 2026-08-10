@@ -1,66 +1,133 @@
-import time
+import re
 
 from appium.webdriver.common.appiumby import AppiumBy
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
+from selenium.webdriver.support.ui import WebDriverWait
 
-from .app_common import logger, AppConfig
+from commons.diagnostics import capture_failure
+
+from .app_common import AppConfig, logger
 
 
 class ShippingPage:
-    """海运业务页面对象（骨架版）
+    """Navigation and diagnostics facade for the international shipping flow."""
 
-    这里先提供一个可运行的基础流程：
-    1. 等待海运首页加载
-    2. 简单执行一两个核心操作占位（根据你后续提供的具体流程再细化）
-    """
+    SHIPPING_TITLE = "鍥介檯璐ц繍"
+    SHIPPING_SERVICE_MARKERS = (
+        "瀵勪欢鑿插緥瀹�",
+        "瀵勪欢鍏ㄧ悆",
+        "閰嶉€佽鍗�",
+    )
+    DELIVERY_ORDERS_TAB = "閰嶉€佽鍗�"
+    DELIVERY_ORDER_MARKERS = (
+        "鍏ㄩ儴",
+        "寰呬粯娆�",
+        "寰呮敹璐�",
+        "宸插畬鎴�",
+        "宸插彇娑�",
+    )
+    HOME_TAB = "棣栭〉"
 
     def __init__(self, driver):
         self.driver = driver
         self.wait = WebDriverWait(driver, AppConfig.WAIT_TIMEOUT)
 
-    def _find(self, by, value, timeout=None):
-        try:
-            return WebDriverWait(self.driver, timeout or AppConfig.WAIT_TIMEOUT).until(
-                EC.presence_of_element_located((by, value))
-            )
-        except TimeoutException:
-            return None
+    def _first_displayed(self, by, value):
+        for element in self.driver.find_elements(by, value):
+            try:
+                if element.is_displayed():
+                    return element
+            except Exception:
+                continue
+        return None
 
-    def _click(self, by, value, timeout=None):
-        try:
-            el = WebDriverWait(self.driver, timeout or AppConfig.WAIT_TIMEOUT).until(
-                EC.element_to_be_clickable((by, value))
+    def _click_text(self, labels) -> bool:
+        for label in labels:
+            element = self._first_displayed(
+                AppiumBy.XPATH,
+                f'//*[@text="{label}" or @content-desc="{label}" '
+                f'or contains(@content-desc,"{label}")]',
             )
-            el.click()
-            return True
-        except TimeoutException:
-            return False
-
-    def wait_for_shipping_home(self):
-        """通过关键文案判断是否在海运首页"""
-        logger.info("等待海运首页加载...")
-        indicators = [
-            (AppiumBy.XPATH, '//*[contains(@text, "海运")]'),
-            (AppiumBy.XPATH, '//*[contains(@text, "海运物流")]'),
-        ]
-        for by, value in indicators:
-            el = self._find(by, value, timeout=8)
-            if el:
-                logger.info("✅ 海运首页加载完成")
-                return True
-        logger.warning("⚠️ 未能确认海运首页，请检查定位器是否需要调整")
+            if element is None:
+                continue
+            try:
+                if element.is_enabled():
+                    element.click()
+                    return True
+            except Exception:
+                continue
         return False
 
-    def run_main_flow(self):
-        """海运业务主流程占位：目前只做『页面可达 + 关键元素存在』校验"""
-        if not self.wait_for_shipping_home():
+    def _wait_until(self, predicate, timeout=None) -> bool:
+        try:
+            return bool(
+                WebDriverWait(
+                    self.driver,
+                    timeout if timeout is not None else AppConfig.WAIT_TIMEOUT,
+                ).until(
+                    lambda _driver: predicate()
+                )
+            )
+        except TimeoutException:
             return False
 
-        # TODO: 根据你后续的海运业务路径，补充具体操作，比如：
-        # 选择出发/到达港口、选择货物类型、计算运费、提交运单等。
-        logger.info("✅ 海运业务页面已打开（后续业务步骤可在 ShippingPage.run_main_flow 中继续完善）")
-        time.sleep(1)
-        return True
+    def page_blob(self) -> str:
+        try:
+            return self.driver.page_source or ""
+        except Exception:
+            return ""
 
+    def _is_shipping_home_page(self) -> bool:
+        blob = self.page_blob()
+        return self.SHIPPING_TITLE in blob and any(
+            marker in blob for marker in self.SHIPPING_SERVICE_MARKERS
+        )
+
+    def _is_delivery_orders_page(self) -> bool:
+        blob = self.page_blob()
+        return self.DELIVERY_ORDERS_TAB in blob and any(
+            marker in blob for marker in self.DELIVERY_ORDER_MARKERS
+        )
+
+    def wait_for_shipping_home(self, timeout=None) -> bool:
+        """Wait until the shipping title and a service marker are both visible."""
+        return self._wait_until(self._is_shipping_home_page, timeout)
+
+    def enter_from_app_home(self) -> bool:
+        if self.wait_for_shipping_home(timeout=1):
+            return True
+        entry = self._first_displayed(
+            AppiumBy.XPATH,
+            '//*[@text="鍥介檯璐ц繍" or @content-desc="鍥介檯璐ц繍" '
+            'or contains(@content-desc,"鍥介檯璐ц繍")]',
+        )
+        if entry is None:
+            logger.error("App 棣栭〉鏈壘鍒板浗闄呰揣杩愬叆鍙�")
+            self.capture_shipping_failure("shipping_entry_missing")
+            return False
+        entry.click()
+        return self.wait_for_shipping_home()
+
+    def switch_to_delivery_orders(self) -> bool:
+        if self._is_delivery_orders_page():
+            return True
+        if not self._click_text((self.DELIVERY_ORDERS_TAB,)):
+            return False
+        return self._wait_until(self._is_delivery_orders_page)
+
+    def switch_to_shipping_home(self) -> bool:
+        if self._is_shipping_home_page():
+            return True
+        if not self._click_text((self.SHIPPING_TITLE, self.HOME_TAB)):
+            return False
+        return self._wait_until(self._is_shipping_home_page)
+
+    def capture_shipping_failure(self, stage: str) -> None:
+        safe_stage = re.sub(r"[^a-z0-9_-]+", "_", stage.lower())[:80]
+        artifacts = capture_failure(self.driver, safe_stage, AppConfig.ARTIFACTS_DIR)
+        logger.error(
+            "Shipping flow failed stage=%s screenshot=%s page_source=%s",
+            safe_stage,
+            artifacts.screenshot,
+            artifacts.page_source,
+        )
