@@ -72,14 +72,19 @@ class FakeShippingDriver:
 
 
 def _record_capture(monkeypatch):
-    calls = []
+    class CaptureCalls(list):
+        artifacts = []
+
+    calls = CaptureCalls()
 
     def capture(driver, stage, artifacts_dir, include_screenshot=True):
         calls.append((driver, stage, artifacts_dir, include_screenshot))
-        return SimpleNamespace(
+        artifacts = SimpleNamespace(
             screenshot=f"artifacts/{stage}.png" if include_screenshot else None,
             page_source=f"artifacts/{stage}.xml",
         )
+        calls.artifacts.append(artifacts)
+        return artifacts
 
     monkeypatch.setattr(shipping_page_module, "capture_failure", capture)
     return calls
@@ -189,5 +194,26 @@ def test_capture_shipping_failure_redacts_stage_secrets_and_hides_sensitive_scre
     assert calls[0][0] is driver
     assert calls[0][1] == expected_stage
     assert calls[0][3] is False
+    assert calls.artifacts[0].screenshot is None
+    assert secret not in calls.artifacts[0].page_source
     assert secret not in calls[0][1]
     assert secret not in repr(logged[0][2:])
+
+
+@pytest.mark.parametrize(
+    ("stage", "secret"),
+    [
+        ("Checkout Pay_Password=123456/Retry", "123456"),
+        ("Refresh Access_Token:abc/Retry", "abc"),
+    ],
+)
+def test_composite_stage_secrets_are_absent_from_non_sensitive_artifact_paths(
+    monkeypatch, stage, secret
+):
+    calls = _record_capture(monkeypatch)
+
+    ShippingPage(FakeShippingDriver()).capture_shipping_failure(stage)
+
+    assert calls.artifacts[0].screenshot is not None
+    assert secret not in calls.artifacts[0].screenshot
+    assert secret not in calls.artifacts[0].page_source
