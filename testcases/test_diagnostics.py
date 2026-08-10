@@ -11,7 +11,11 @@ class FakeDriver:
         '<node pass' + 'word="secret" text="09123456789" content-desc="123456" />'
     )
 
+    def __init__(self):
+        self.screenshot_calls = 0
+
     def save_screenshot(self, path):
+        self.screenshot_calls += 1
         with open(path, "wb") as stream:
             stream.write(b"png")
         return True
@@ -62,3 +66,22 @@ def test_capture_failure_tolerates_unavailable_driver_evidence(tmp_path):
     assert artifacts.context == ""
     assert artifacts.screenshot is None
     assert artifacts.page_source is None
+
+
+def test_capture_failure_can_skip_screenshot_and_keep_sanitized_xml(tmp_path):
+    from commons.diagnostics import capture_failure
+
+    driver = FakeDriver()
+    artifacts = capture_failure(
+        driver,
+        "sensitive_address",
+        artifacts_dir=tmp_path,
+        include_screenshot=False,
+    )
+
+    assert artifacts.screenshot is None
+    assert driver.screenshot_calls == 0
+    assert artifacts.page_source and artifacts.page_source.exists()
+    xml = artifacts.page_source.read_text(encoding="utf-8")
+    assert "secret" not in xml
+    assert "09123456789" not in xml

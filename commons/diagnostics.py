@@ -50,27 +50,31 @@ def sanitize_xml(text: str) -> str:
 
 
 def capture_failure(
-    driver, action: str, artifacts_dir: str | Path = "logs"
+    driver,
+    action: str,
+    artifacts_dir: str | Path = "logs",
+    include_screenshot: bool = True,
 ) -> FailureArtifacts:
-    """Capture independent screenshot/source evidence without raising."""
+    """Capture sanitized source evidence and, when allowed, a screenshot."""
     root = Path(artifacts_dir)
     root.mkdir(parents=True, exist_ok=True)
     action_tag = _safe_action(action)
     prefix = f"{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}_{action_tag}"
-    screenshot_path = root / f"{prefix}.png"
+    screenshot_path = root / f"{prefix}.png" if include_screenshot else None
     source_path = root / f"{prefix}.xml"
     saved_screenshot = None
     saved_source = None
 
-    try:
-        if driver.save_screenshot(str(screenshot_path)):
-            saved_screenshot = screenshot_path
-    except Exception as exc:
-        logger.warning(
-            "failure screenshot unavailable action=%s error_type=%s",
-            action_tag,
-            type(exc).__name__,
-        )
+    if include_screenshot:
+        try:
+            if driver.save_screenshot(str(screenshot_path)):
+                saved_screenshot = screenshot_path
+        except Exception as exc:
+            logger.warning(
+                "failure screenshot unavailable action=%s error_type=%s",
+                action_tag,
+                type(exc).__name__,
+            )
 
     try:
         source_path.write_text(sanitize_xml(driver.page_source), encoding="utf-8")

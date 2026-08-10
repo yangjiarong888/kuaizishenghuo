@@ -12,41 +12,42 @@ from .app_common import AppConfig, logger
 class ShippingPage:
     """Navigation and diagnostics facade for the international shipping flow."""
 
-    SHIPPING_TITLE = "鍥介檯璐ц繍"
-    SHIPPING_SERVICE_MARKERS = (
-        "瀵勪欢鑿插緥瀹�",
-        "瀵勪欢鍏ㄧ悆",
-        "閰嶉€佽鍗�",
+    SHIPPING_TITLE = "国际货运"
+    SHIPPING_SERVICE_MARKERS = ("寄件菲律宾", "寄件全球", "配送订单")
+    DELIVERY_ORDERS_TAB = "配送订单"
+    DELIVERY_ORDER_MARKERS = ("全部", "待付款", "待收货", "已完成", "已取消")
+    HOME_TAB = "首页"
+    _SECRET_STAGE_VALUE = re.compile(
+        r"(?i)\b(password|passwd|pwd|token|secret)\b(?:\s*[:=]\s*|\s+)[^\s/,&]+"
     )
-    DELIVERY_ORDERS_TAB = "閰嶉€佽鍗�"
-    DELIVERY_ORDER_MARKERS = (
-        "鍏ㄩ儴",
-        "寰呬粯娆�",
-        "寰呮敹璐�",
-        "宸插畬鎴�",
-        "宸插彇娑�",
-    )
-    HOME_TAB = "棣栭〉"
 
     def __init__(self, driver):
         self.driver = driver
-        self.wait = WebDriverWait(driver, AppConfig.WAIT_TIMEOUT)
 
     def _first_displayed(self, by, value):
-        for element in self.driver.find_elements(by, value):
+        try:
+            elements = self.driver.find_elements(by, value)
+        except Exception as exc:
+            logger.debug(
+                "Shipping element lookup failed error_type=%s", type(exc).__name__
+            )
+            return None
+        for element in elements:
             try:
                 if element.is_displayed():
                     return element
-            except Exception:
-                continue
+            except Exception as exc:
+                logger.debug(
+                    "Shipping element visibility check failed error_type=%s",
+                    type(exc).__name__,
+                )
         return None
 
     def _click_text(self, labels) -> bool:
         for label in labels:
             element = self._first_displayed(
                 AppiumBy.XPATH,
-                f'//*[@text="{label}" or @content-desc="{label}" '
-                f'or contains(@content-desc,"{label}")]',
+                f'//*[@text="{label}" or @content-desc="{label}"]',
             )
             if element is None:
                 continue
@@ -54,8 +55,11 @@ class ShippingPage:
                 if element.is_enabled():
                     element.click()
                     return True
-            except Exception:
-                continue
+            except Exception as exc:
+                logger.debug(
+                    "Shipping tab click failed error_type=%s", type(exc).__name__
+                )
+                return False
         return False
 
     def _wait_until(self, predicate, timeout=None) -> bool:
@@ -64,9 +68,7 @@ class ShippingPage:
                 WebDriverWait(
                     self.driver,
                     timeout if timeout is not None else AppConfig.WAIT_TIMEOUT,
-                ).until(
-                    lambda _driver: predicate()
-                )
+                ).until(lambda _driver: predicate())
             )
         except TimeoutException:
             return False
@@ -74,7 +76,8 @@ class ShippingPage:
     def page_blob(self) -> str:
         try:
             return self.driver.page_source or ""
-        except Exception:
+        except Exception as exc:
+            logger.debug("Shipping page source unavailable error_type=%s", type(exc).__name__)
             return ""
 
     def _is_shipping_home_page(self) -> bool:
@@ -98,33 +101,68 @@ class ShippingPage:
             return True
         entry = self._first_displayed(
             AppiumBy.XPATH,
-            '//*[@text="鍥介檯璐ц繍" or @content-desc="鍥介檯璐ц繍" '
-            'or contains(@content-desc,"鍥介檯璐ц繍")]',
+            '//*[@text="国际货运" or @content-desc="国际货运"]',
         )
         if entry is None:
-            logger.error("App 棣栭〉鏈壘鍒板浗闄呰揣杩愬叆鍙�")
+            logger.error("International shipping entry not found")
             self.capture_shipping_failure("shipping_entry_missing")
             return False
-        entry.click()
-        return self.wait_for_shipping_home()
+        try:
+            entry.click()
+        except Exception as exc:
+            logger.error(
+                "International shipping entry click failed error_type=%s",
+                type(exc).__name__,
+            )
+            self.capture_shipping_failure("shipping_entry_click_failed")
+            return False
+        if self.wait_for_shipping_home():
+            return True
+        logger.error("International shipping entry destination timed out")
+        self.capture_shipping_failure("shipping_entry_timeout")
+        return False
 
     def switch_to_delivery_orders(self) -> bool:
         if self._is_delivery_orders_page():
             return True
         if not self._click_text((self.DELIVERY_ORDERS_TAB,)):
+            logger.error("Shipping delivery-orders tab not available")
+            self.capture_shipping_failure("shipping_delivery_tab_missing")
             return False
-        return self._wait_until(self._is_delivery_orders_page)
+        if self._wait_until(self._is_delivery_orders_page):
+            return True
+        logger.error("Shipping delivery-orders tab destination timed out")
+        self.capture_shipping_failure("shipping_delivery_tab_timeout")
+        return False
 
     def switch_to_shipping_home(self) -> bool:
         if self._is_shipping_home_page():
             return True
         if not self._click_text((self.SHIPPING_TITLE, self.HOME_TAB)):
+            logger.error("Shipping home tab not available")
+            self.capture_shipping_failure("shipping_home_tab_missing")
             return False
-        return self._wait_until(self._is_shipping_home_page)
+        if self._wait_until(self._is_shipping_home_page):
+            return True
+        logger.error("Shipping home tab destination timed out")
+        self.capture_shipping_failure("shipping_home_tab_timeout")
+        return False
 
-    def capture_shipping_failure(self, stage: str) -> None:
-        safe_stage = re.sub(r"[^a-z0-9_-]+", "_", stage.lower())[:80]
-        artifacts = capture_failure(self.driver, safe_stage, AppConfig.ARTIFACTS_DIR)
+    @classmethod
+    def _safe_failure_stage(cls, stage: str) -> str:
+        redacted = cls._SECRET_STAGE_VALUE.sub(
+            lambda match: f"{match.group(1)}_redacted", str(stage)
+        )
+        return re.sub(r"[^a-z0-9_-]+", "_", redacted.lower())[:80].strip("_") or "failure"
+
+    def capture_shipping_failure(self, stage: str, sensitive: bool = False) -> None:
+        safe_stage = self._safe_failure_stage(stage)
+        artifacts = capture_failure(
+            self.driver,
+            safe_stage,
+            AppConfig.ARTIFACTS_DIR,
+            include_screenshot=not sensitive,
+        )
         logger.error(
             "Shipping flow failed stage=%s screenshot=%s page_source=%s",
             safe_stage,
