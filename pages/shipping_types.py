@@ -47,23 +47,19 @@ def mask_phone(value: str) -> str:
 
 def parse_delivery_date(label: str, today: date) -> date | None:
     text = label.strip()
-    if "\u6D60\u5A42\u3049" in text:
+    if "今天" in text:
         return today
-    if "\u93C4\u5EA1\u3049" in text:
+    if "明天" in text:
         return today + timedelta(days=1)
-    if "\u935A\u5EA1\u3049" in text:
+    if "后天" in text:
         return today + timedelta(days=2)
-    full = re.search(r"(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})", text)
+    full = re.search(r"(20\d{2})[-/.年](\d{1,2})[-/.月](\d{1,2})", text)
     if full:
         return date(*(int(group) for group in full.groups()))
-    month_day = re.search(r"(\d{1,2})\u93C8\?(\d?)\u93C3\?", text)
+    month_day = re.search(r"(\d{1,2})月(\d{1,2})日", text)
     if not month_day:
         return None
-    month_text, day_text = month_day.groups()
-    if not day_text:
-        return None
-    month = int(month_text)
-    day = int(f"1{day_text}")
+    month, day = (int(group) for group in month_day.groups())
     try:
         candidate = date(today.year, month, day)
     except ValueError:
@@ -80,27 +76,17 @@ def earliest_future_label(labels: list[str], today: date) -> tuple[str, date]:
         if parsed is not None and parsed > today:
             candidates.append((parsed, label))
     if not candidates:
-        raise ValueError("\u93C8\uE045\u6F75\u95B0\u5D89\u20AC\u4F79\u68E9\u93C8?")
+        raise ValueError("未找到严格晚于今天的未来配送日期")
     parsed, label = min(candidates, key=lambda item: item[0])
     return label, parsed
 
 
 def classify_payment_state(text: str) -> OrderPaymentState:
-    if any(
-        marker in text
-        for marker in ("\u5BF0\u546E\u656E\u6D60?", "\u5BF0\u546C\u7CAF\u5A06?")
-    ):
+    if any(marker in text for marker in ("待支付", "待付款")):
         return OrderPaymentState.PENDING
-    if "\u7490\u0443\u57CC\u6D60\u6A3B\uE0D9" in text:
+    if "货到付款" in text:
         return OrderPaymentState.COD
-    if any(
-        marker in text
-        for marker in (
-            "\u93C0\uE219\u7CAF\u93B4\u612C\u59DB",
-            "\u5BB8\u53C9\u656E\u6D60?",
-            "\u9366\u3127\u568E\u93C0\uE219\u7CAF",
-        )
-    ):
+    if any(marker in text for marker in ("支付成功", "已支付", "在线支付")):
         return OrderPaymentState.PAID
     return OrderPaymentState.UNKNOWN
 

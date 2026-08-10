@@ -32,45 +32,55 @@ def test_mask_phone_never_returns_full_number():
 
 
 @pytest.mark.parametrize(
-    "label",
-    ("\u6D60\u5A42\u3049", "8\u93C8?0\u93C3?", "2026-08-10"),
+    ("label", "expected"),
+    (
+        ("今天", date(2026, 8, 10)),
+        ("明天", date(2026, 8, 11)),
+        ("后天", date(2026, 8, 12)),
+        ("8月2日", date(2026, 8, 2)),
+        ("8月12日", date(2026, 8, 12)),
+        ("2026-08-10", date(2026, 8, 10)),
+    ),
 )
-def test_today_is_never_future(label):
-    today = date(2026, 8, 10)
-
-    assert parse_delivery_date(label, today) == today
+def test_parse_delivery_date_recognizes_normal_ui_labels(label, expected):
+    assert parse_delivery_date(label, date(2026, 8, 10)) == expected
 
 
 def test_earliest_future_label_ignores_today_past_and_unparseable():
     today = date(2026, 8, 10)
-    labels = [
-        "\u7487\u70FD\u20AC\u590B\u5AE8",
-        "8\u93C8?\u93C3?",
-        "\u6D60\u5A42\u3049",
-        "8\u93C8?2\u93C3?",
-        "\u93C4\u5EA1\u3049",
-        "8\u93C8?3\u93C3?",
-    ]
+    labels = ["请选择", "8月2日", "今天", "8月12日", "后天", "明天"]
 
-    assert earliest_future_label(labels, today) == (
-        "\u93C4\u5EA1\u3049",
-        date(2026, 8, 11),
-    )
+    assert earliest_future_label(labels, today) == ("明天", date(2026, 8, 11))
 
 
 def test_earliest_future_label_fails_when_only_today_exists():
-    with pytest.raises(ValueError, match="\u93C8\uE045\u6F75\u95B0\u5D89\u20AC\u4F79\u68E9\u93C8?"):
-        earliest_future_label(
-            ["\u6D60\u5A42\u3049", "8\u93C8?0\u93C3?"],
-            date(2026, 8, 10),
-        )
+    with pytest.raises(ValueError, match="未来配送日期"):
+        earliest_future_label(["今天", "8月2日"], date(2026, 8, 10))
 
 
-def test_only_pending_payment_can_cancel_payment():
-    assert classify_payment_state(
-        "\u7481\u3220\u5D1F\u9418\u8235\u20AC\u4F8A\u7D30\u5BF0\u546E\u656E\u6D60?"
-    ) is OrderPaymentState.PENDING
-    assert can_cancel_payment(OrderPaymentState.PENDING) is True
-    assert can_cancel_payment(OrderPaymentState.PAID) is False
-    assert can_cancel_payment(OrderPaymentState.COD) is False
-    assert can_cancel_payment(OrderPaymentState.UNKNOWN) is False
+@pytest.mark.parametrize(
+    "text",
+    ("订单状态：待支付", "订单状态：待付款"),
+)
+def test_pending_payment_is_the_only_cancellable_state(text):
+    state = classify_payment_state(text)
+
+    assert state is OrderPaymentState.PENDING
+    assert can_cancel_payment(state) is True
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    (
+        ("已支付", OrderPaymentState.PAID),
+        ("支付成功", OrderPaymentState.PAID),
+        ("在线支付", OrderPaymentState.PAID),
+        ("货到付款", OrderPaymentState.COD),
+        ("unknown", OrderPaymentState.UNKNOWN),
+    ),
+)
+def test_non_pending_payment_states_cannot_cancel(text, expected):
+    state = classify_payment_state(text)
+
+    assert state is expected
+    assert can_cancel_payment(state) is False
