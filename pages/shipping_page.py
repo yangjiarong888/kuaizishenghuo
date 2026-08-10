@@ -18,7 +18,8 @@ class ShippingPage:
     DELIVERY_ORDER_MARKERS = ("全部", "待付款", "待收货", "已完成", "已取消")
     HOME_TAB = "首页"
     _SECRET_STAGE_VALUE = re.compile(
-        r"(?i)\b(password|passwd|pwd|token|secret)\b(?:\s*[:=]\s*|\s+)[^\s/,&]+"
+        r"(?i)(?<![a-z0-9_])(pay_password|access_token|verification_code|"
+        r"password|passwd|pwd|token|secret)(?:\s*[:=]\s*|\s+)[^\s/,&]+"
     )
 
     def __init__(self, driver):

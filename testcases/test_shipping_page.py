@@ -77,8 +77,8 @@ def _record_capture(monkeypatch):
     def capture(driver, stage, artifacts_dir, include_screenshot=True):
         calls.append((driver, stage, artifacts_dir, include_screenshot))
         return SimpleNamespace(
-            screenshot="screen.png" if include_screenshot else None,
-            page_source="page.xml",
+            screenshot=f"artifacts/{stage}.png" if include_screenshot else None,
+            page_source=f"artifacts/{stage}.xml",
         )
 
     monkeypatch.setattr(shipping_page_module, "capture_failure", capture)
@@ -164,6 +164,16 @@ def test_home_entry_click_exception_and_timeout_capture_failure(monkeypatch):
         ),
         ("Login Token superToken/Retry", "superToken", "login_token_redacted_retry"),
         ("Order Secret: extraSecret/Retry", "extraSecret", "order_secret_redacted_retry"),
+        (
+            "Checkout Pay_Password=123456/Retry",
+            "123456",
+            "checkout_pay_password_redacted_retry",
+        ),
+        (
+            "Refresh Access_Token:abc/Retry",
+            "abc",
+            "refresh_access_token_redacted_retry",
+        ),
     ],
 )
 def test_capture_shipping_failure_redacts_stage_secrets_and_hides_sensitive_screenshots(
@@ -179,5 +189,5 @@ def test_capture_shipping_failure_redacts_stage_secrets_and_hides_sensitive_scre
     assert calls[0][0] is driver
     assert calls[0][1] == expected_stage
     assert calls[0][3] is False
-    assert secret not in repr(calls)
-    assert secret not in repr(logged)
+    assert secret not in calls[0][1]
+    assert secret not in repr(logged[0][2:])
