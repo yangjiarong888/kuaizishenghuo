@@ -7,9 +7,10 @@ from selenium.webdriver.support.ui import WebDriverWait
 from commons.diagnostics import capture_failure
 
 from .app_common import AppConfig, logger
+from .shipping_address_mixin import ShippingAddressMixin
 
 
-class ShippingPage:
+class ShippingPage(ShippingAddressMixin):
     """Navigation and diagnostics facade for the international shipping flow."""
 
     SHIPPING_TITLE = "国际货运"
@@ -73,6 +74,27 @@ class ShippingPage:
             )
         except TimeoutException:
             return False
+
+    def _type_field(self, labels, value: str) -> bool:
+        for label in labels:
+            field = self._first_displayed(
+                AppiumBy.XPATH,
+                f'//*[@text="{label}" or @content-desc="{label}"]'
+                "/following::android.widget.EditText[1]",
+            )
+            if field is None:
+                continue
+            try:
+                field.click()
+                try:
+                    field.clear()
+                except Exception:
+                    pass
+                field.send_keys(value)
+                return True
+            except Exception as exc:
+                logger.debug("Shipping address field entry failed error_type=%s", type(exc).__name__)
+        return False
 
     def page_blob(self) -> str:
         try:

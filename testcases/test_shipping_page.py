@@ -1,10 +1,13 @@
+import re
 from types import SimpleNamespace
 
 import pytest
 
+import pages.shipping_address_mixin as shipping_address_mixin_module
 import pages.shipping_page as shipping_page_module
 
 from pages.shipping_page import ShippingPage
+from pages.shipping_types import AddressData, AddressPolicy
 
 
 class FakeElement:
@@ -69,6 +72,203 @@ class FakeShippingDriver:
     def _show_delivery_orders(self):
         self.screen = "delivery_orders"
         self.page_source = "配送订单 全部 待付款 待收货 已完成 已取消"
+
+
+class FakeAddressElement(FakeElement):
+    def __init__(self, driver, text="", on_click=None, content_desc=""):
+        super().__init__(driver, text, on_click)
+        self.content_desc = content_desc
+
+    def get_attribute(self, name):
+        if name == "text":
+            return self.text
+        if name == "content-desc":
+            return self.content_desc
+        return ""
+
+
+class FakeAddressField(FakeAddressElement):
+    def __init__(self, driver, field):
+        super().__init__(driver, field)
+        self.field = field
+
+    def clear(self):
+        self.driver.address_form_values[self.field] = ""
+
+    def send_keys(self, value):
+        self.driver.address_form_values[self.field] = value
+
+
+class FakeAddressShippingDriver(FakeShippingDriver):
+    """A small address-book model that exposes only public UI interactions."""
+
+    FIELD_LABELS = {
+        "name": "联系人",
+        "phone": "手机号码",
+        "detail": "详细地址",
+        "postcode": "邮政编码",
+    }
+
+    def __init__(self, address_book=()):
+        super().__init__()
+        self.screen = "checkout"
+        self.address_book = list(address_book)
+        self.selected_address = ""
+        self.address_form_values = {}
+        self.page_source = "提交订单 请选择收货地址"
+
+    @classmethod
+    def with_address_book(cls, address_book):
+        return cls(address_book)
+
+    def _show_address_book(self):
+        self.screen = "address_book"
+        self.page_source = "选择收货地址 新增地址 " + " ".join(self.address_book)
+
+    def _show_address_form(self):
+        self.screen = "address_form"
+        self.page_source = "新增地址 联系人 手机号码 国家 城市 详细地址 邮政编码 保存"
+
+    def _select_address(self, address):
+        self.selected_address = address
+        self.screen = "checkout"
+        self.page_source = "提交订单 收货地址 " + address
+
+    def _save_address(self):
+        values = self.address_form_values
+        address = "{name} {phone} {city} {detail}".format(
+            name=values.get("name", ""),
+            phone=values.get("phone", ""),
+            city=values.get("city", ""),
+            detail=values.get("detail", ""),
+        ).strip()
+        self.address_book.append(address)
+        self._show_address_book()
+
+    def find_elements(self, by, value):
+        exact_labels = {
+            self._text_selector("请选择收货地址"): FakeAddressElement(
+                self, "请选择收货地址", self._show_address_book
+            ),
+            self._text_selector("收货地址"): FakeAddressElement(
+                self, "收货地址", self._show_address_book
+            ),
+            self._text_selector("配送地址"): FakeAddressElement(
+                self, "配送地址", self._show_address_book
+            ),
+            self._text_selector("新增地址"): FakeAddressElement(
+                self, "新增地址", self._show_address_form
+            ),
+            self._text_selector("添加地址"): FakeAddressElement(
+                self, "添加地址", self._show_address_form
+            ),
+            self._text_selector("保存"): FakeAddressElement(self, "保存", self._save_address),
+            self._text_selector("菲律宾"): FakeAddressElement(self, "菲律宾"),
+            self._text_selector("Manila"): FakeAddressElement(self, "Manila"),
+        }
+        if value in exact_labels:
+            element = exact_labels[value]
+            if self.screen == "checkout" and element.text in {"请选择收货地址", "收货地址", "配送地址"}:
+                return [element]
+            if self.screen == "address_book" and element.text in {"新增地址", "添加地址"}:
+                return [element]
+            if self.screen == "address_form" and element.text in {"保存", "菲律宾", "Manila"}:
+                return [element]
+            return []
+        if self.screen == "address_book" and "contains(@text" in value:
+            requested = re.findall(r'contains\(@(?:text|content-desc),"([^"]+)"\)', value)
+            return [
+                FakeAddressElement(self, address, lambda a=address: self._select_address(a))
+                for address in self.address_book
+                if any(match in address for match in requested)
+            ]
+        if self.screen == "address_form":
+            for field, label in self.FIELD_LABELS.items():
+                if label in value:
+                    return [FakeAddressField(self, field)]
+        return super().find_elements(by, value)
+
+
+def complete_address(**overrides):
+    values = {
+        "match": "0994",
+        "name": "Tester",
+        "phone": "+639621170994",
+        "country": "菲律宾",
+        "city": "Manila",
+        "detail": "100 Test Street",
+        "postcode": "1000",
+    }
+    values.update(overrides)
+    return AddressData(**values)
+
+
+def test_existing_policy_requires_match_before_clicking():
+    driver = FakeAddressShippingDriver()
+    page = ShippingPage(driver)
+
+    with pytest.raises(ValueError, match="SHIPPING_ADDRESS_MATCH"):
+        page.ensure_shipping_address(AddressPolicy.EXISTING, AddressData())
+
+    assert driver.clicks == []
+
+
+def test_add_policy_requires_complete_fields_before_clicking():
+    driver = FakeAddressShippingDriver()
+    page = ShippingPage(driver)
+
+    with pytest.raises(ValueError, match="phone,country,city,detail,postcode"):
+        page.ensure_shipping_address(AddressPolicy.ADD, AddressData(name="Tester"))
+
+    assert driver.clicks == []
+
+
+def test_auto_selects_matching_existing_address_without_adding():
+    driver = FakeAddressShippingDriver.with_address_book(["Tester +63******0994 Manila"])
+    page = ShippingPage(driver)
+
+    assert page.ensure_shipping_address(AddressPolicy.AUTO, complete_address()) is True
+    assert "新增地址" not in driver.clicks
+    assert driver.selected_address == "Tester +63******0994 Manila"
+
+
+def test_auto_adds_when_matching_address_is_absent():
+    driver = FakeAddressShippingDriver.with_address_book(["Other +63******0000 Cebu"])
+    page = ShippingPage(driver)
+    data = complete_address()
+
+    assert page.ensure_shipping_address(AddressPolicy.AUTO, data) is True
+    assert "新增地址" in driver.clicks
+    assert driver.address_form_values["phone"] == "+639621170994"
+
+
+def test_address_form_failures_capture_sensitive_diagnostics(monkeypatch):
+    driver = FakeAddressShippingDriver()
+    page = ShippingPage(driver)
+    calls = []
+    monkeypatch.setattr(
+        page, "capture_shipping_failure", lambda stage, sensitive=False: calls.append((stage, sensitive))
+    )
+
+    with pytest.raises(AssertionError, match="未找到国家"):
+        page.ensure_shipping_address(
+            AddressPolicy.ADD, complete_address(country="不存在的国家")
+        )
+
+    assert calls == [("shipping_address_country_missing", True)]
+
+
+def test_applied_address_logs_a_masked_phone_without_detail(monkeypatch):
+    driver = FakeAddressShippingDriver.with_address_book(["Tester +63******0994 Manila"])
+    messages = []
+    monkeypatch.setattr(shipping_address_mixin_module.logger, "info", lambda *args: messages.append(args))
+
+    assert ShippingPage(driver).ensure_shipping_address(AddressPolicy.AUTO, complete_address()) is True
+
+    rendered = repr(messages)
+    assert "+639621170994" not in rendered
+    assert "100 Test Street" not in rendered
+    assert "******0994" in rendered
 
 
 def _record_capture(monkeypatch):
