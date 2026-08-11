@@ -1,6 +1,7 @@
 """Delivery-slot selection safeguards for the shipping checkout."""
 
 from datetime import date
+import re
 
 from appium.webdriver.common.appiumby import AppiumBy
 
@@ -13,6 +14,27 @@ class ShippingDeliveryMixin:
 
     _DELIVERY_OPENERS = ("预约配送", "配送时间", "选择上门时间", "选择配送时间")
     _DELIVERY_DISABLED_MARKERS = ("disabled", "不可用", "禁用", "已满", "灰色")
+    _PICKER_MARKERS = ("选择上门时间", "选择配送时间", "配送时间选择")
+    _PICKER_SLOT_SELECTOR = (
+        '//*[contains(@resource-id,"delivery_slot") '
+        'or contains(@resource-id,"appointment_slot") '
+        'or contains(@resource-id,"delivery_date_picker") '
+        'or contains(@resource-id,"delivery_time_picker") '
+        'or contains(@resource-id,"time_slot") '
+        'or @content-desc="配送日期选择" '
+        'or @content-desc="配送时段选择"]'
+    )
+    _CHECKOUT_DELIVERY_FIELD_SELECTOR = (
+        '//*[contains(@resource-id,"delivery_time") '
+        'or contains(@resource-id,"appointment_time") '
+        'or @content-desc="配送时间" '
+        'or @content-desc="预约配送" '
+        'or @text="配送时间" '
+        'or @text="预约配送"]'
+    )
+    _TIME_RANGE = re.compile(
+        r"(?:[01]?\d|2[0-3]):[0-5]\d\s*[-~至]\s*(?:[01]?\d|2[0-3]):[0-5]\d"
+    )
 
     def device_today(self) -> date:
         """Read the device clock without ever falling back to the host clock."""
@@ -27,30 +49,38 @@ class ShippingDeliveryMixin:
         base = today if today is not None else self.device_today()
         if not self._click_text(self._DELIVERY_OPENERS):
             raise AssertionError("提交订单页未打开配送时间选择器")
+        if not self._wait_until(self._is_delivery_picker_open, timeout=1):
+            raise AssertionError("配送时间选择器未打开")
 
-        elements = self._delivery_candidate_elements()
-        labels = [self._element_blob(element) for element in elements]
-        try:
-            chosen_label, chosen_date = earliest_future_label(labels, base)
-        except ValueError as exc:
-            raise AssertionError("未找到严格晚于今天的可选配送日期") from exc
-
-        chosen = next(
-            (
+        elements = self._picker_slot_elements()
+        combined = [
+            element
+            for element in elements
+            if self._is_combined_slot(self._element_blob(element))
+        ]
+        if combined:
+            chosen_date = self._select_earliest_future_date(combined, base)
+        else:
+            date_controls = [
                 element
                 for element in elements
-                if self._element_blob(element) == chosen_label
-                and self._element_enabled(element)
-            ),
-            None,
-        )
-        if chosen is None:
-            raise AssertionError("未来配送日期选项不可点击")
-        try:
-            chosen.click()
-        except Exception as exc:
-            raise AssertionError("未来配送日期点击失败") from exc
-        self._click_text(("确定", "确认"))
+                if parse_delivery_date(self._element_blob(element), base) is not None
+                and not self._is_time_range(self._element_blob(element))
+            ]
+            chosen_date = self._select_earliest_future_date(date_controls, base)
+            time_control = next(
+                (
+                    element
+                    for element in self._picker_slot_elements()
+                    if self._is_time_range(self._element_blob(element))
+                    and self._element_enabled(element)
+                ),
+                None,
+            )
+            if time_control is None:
+                raise AssertionError("未找到可选配送时段")
+            self._click_delivery_element(time_control, "配送时段")
+        self._confirm_or_verify_picker_auto_closed()
         self.verify_selected_delivery_date(chosen_date, base)
         logger.info("配送日期已选择 selected=%s today=%s", chosen_date, base)
         return chosen_date
@@ -68,10 +98,38 @@ class ShippingDeliveryMixin:
             )
         return True
 
-    def _delivery_candidate_elements(self) -> list:
-        """Return only displayed, enabled, clickable, non-disabled UI elements."""
+    def _select_earliest_future_date(self, elements: list, today: date) -> date:
+        labels = [self._element_blob(element) for element in elements]
         try:
-            elements = self.driver.find_elements(AppiumBy.XPATH, "//*[@text or @content-desc]")
+            chosen_label, chosen_date = earliest_future_label(labels, today)
+        except ValueError as exc:
+            raise AssertionError("未找到严格晚于今天的可选配送日期") from exc
+        chosen = next(
+            (
+                element
+                for element in elements
+                if self._element_blob(element) == chosen_label
+                and self._element_enabled(element)
+            ),
+            None,
+        )
+        if chosen is None:
+            raise AssertionError("未来配送日期选项不可点击")
+        self._click_delivery_element(chosen, "未来配送日期")
+        return chosen_date
+
+    def _click_delivery_element(self, element, label: str) -> None:
+        try:
+            element.click()
+        except Exception as exc:
+            raise AssertionError(f"{label}点击失败") from exc
+
+    def _picker_slot_elements(self) -> list:
+        """Return eligible controls with an explicit delivery-slot identity."""
+        try:
+            elements = self.driver.find_elements(
+                AppiumBy.XPATH, self._PICKER_SLOT_SELECTOR
+            )
         except Exception as exc:
             logger.debug(
                 "Shipping delivery candidate lookup failed error_type=%s",
@@ -79,6 +137,25 @@ class ShippingDeliveryMixin:
             )
             return []
         return [element for element in elements if self._element_enabled(element)]
+
+    def _is_delivery_picker_open(self) -> bool:
+        return any(marker in self.page_blob() for marker in self._PICKER_MARKERS) and bool(
+            self._picker_slot_elements()
+        )
+
+    def _is_checkout_rendered(self) -> bool:
+        blob = self.page_blob()
+        return "提交订单" in blob and not any(
+            marker in blob for marker in self._PICKER_MARKERS
+        )
+
+    def _confirm_or_verify_picker_auto_closed(self) -> None:
+        if self._wait_until(self._is_checkout_rendered, timeout=0):
+            return
+        if not self._click_text(("确定", "确认")):
+            raise AssertionError("未找到配送时间确认按钮")
+        if not self._wait_until(self._is_checkout_rendered, timeout=1):
+            raise AssertionError("确认后未返回提交订单页")
 
     def _element_enabled(self, element) -> bool:
         try:
@@ -95,9 +172,10 @@ class ShippingDeliveryMixin:
                 continue
         if any(value in {"false", "0", "no"} for value in attributes[:2]):
             return False
+        visible_blob = self._element_blob(element).lower()
         return not any(
             marker in value
-            for value in attributes
+            for value in (*attributes, visible_blob)
             for marker in self._DELIVERY_DISABLED_MARKERS
         )
 
@@ -116,4 +194,32 @@ class ShippingDeliveryMixin:
         return " ".join(dict.fromkeys(value.strip() for value in values if value.strip()))
 
     def _checkout_delivery_text(self) -> str:
-        return self.page_blob()
+        try:
+            elements = self.driver.find_elements(
+                AppiumBy.XPATH, self._CHECKOUT_DELIVERY_FIELD_SELECTOR
+            )
+        except Exception as exc:
+            logger.debug(
+                "Shipping checkout delivery field lookup failed error_type=%s",
+                type(exc).__name__,
+            )
+            elements = []
+        for element in elements:
+            try:
+                if element.is_displayed():
+                    text = self._element_blob(element)
+                    if text:
+                        return text
+            except Exception:
+                continue
+        raise AssertionError("提交订单页未找到配送时间回读字段")
+
+    @classmethod
+    def _is_time_range(cls, label: str) -> bool:
+        return bool(cls._TIME_RANGE.search(label))
+
+    @classmethod
+    def _is_combined_slot(cls, label: str) -> bool:
+        return cls._is_time_range(label) and any(
+            marker in label for marker in ("今天", "明天", "后天", "月", "年")
+        )
