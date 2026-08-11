@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Iterable
 
 from commons.logger import setup_logger
 
@@ -42,11 +43,14 @@ def _safe_action(action: str) -> str:
     return value[:48] or "failure"
 
 
-def sanitize_xml(text: str) -> str:
+def sanitize_xml(text: str, redact_values: Iterable[str] = ()) -> str:
     """Redact secret-like values and personal numeric identifiers."""
     sanitized = _KEYED_ATTRIBUTE.sub(r"\1<redacted>\3", text or "")
     sanitized = _PHONE_LIKE.sub("<redacted>", sanitized)
-    return _SHORT_CODE_ATTRIBUTE.sub(r"\1<redacted>\2", sanitized)
+    sanitized = _SHORT_CODE_ATTRIBUTE.sub(r"\1<redacted>\2", sanitized)
+    for value in sorted({str(value).strip() for value in redact_values if str(value).strip()}, key=len, reverse=True):
+        sanitized = sanitized.replace(value, "<redacted>")
+    return sanitized
 
 
 def capture_failure(
@@ -54,6 +58,7 @@ def capture_failure(
     action: str,
     artifacts_dir: str | Path = "logs",
     include_screenshot: bool = True,
+    redact_values: Iterable[str] = (),
 ) -> FailureArtifacts:
     """Capture sanitized source evidence and, when allowed, a screenshot."""
     root = Path(artifacts_dir)
@@ -77,7 +82,9 @@ def capture_failure(
             )
 
     try:
-        source_path.write_text(sanitize_xml(driver.page_source), encoding="utf-8")
+        source_path.write_text(
+            sanitize_xml(driver.page_source, redact_values=redact_values), encoding="utf-8"
+        )
         saved_source = source_path
     except Exception as exc:
         logger.warning(

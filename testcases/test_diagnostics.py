@@ -85,3 +85,32 @@ def test_capture_failure_can_skip_screenshot_and_keep_sanitized_xml(tmp_path):
     xml = artifacts.page_source.read_text(encoding="utf-8")
     assert "secret" not in xml
     assert "09123456789" not in xml
+
+
+def test_capture_failure_redacts_explicit_sensitive_values_from_xml(tmp_path):
+    from commons.diagnostics import capture_failure
+
+    driver = FakeDriver()
+    driver.page_source = (
+        '<node text="Tester Manila 100 Test Street 1000" content-desc="+639621170994" />'
+    )
+
+    artifacts = capture_failure(
+        driver,
+        "sensitive_address",
+        artifacts_dir=tmp_path,
+        include_screenshot=False,
+        redact_values=(
+            "Tester",
+            "+639621170994",
+            "菲律宾",
+            "Manila",
+            "100 Test Street",
+            "1000",
+        ),
+    )
+
+    xml = artifacts.page_source.read_text(encoding="utf-8")
+    for value in ("Tester", "+639621170994", "菲律宾", "Manila", "100 Test Street", "1000"):
+        assert value not in xml
+    assert "<redacted>" in xml

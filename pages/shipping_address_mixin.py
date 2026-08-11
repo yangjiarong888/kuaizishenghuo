@@ -26,15 +26,17 @@ class ShippingAddressMixin:
 
     def _ensure_shipping_address_ui(self, policy: AddressPolicy, data: AddressData) -> bool:
         if not self._click_text(("请选择收货地址", "收货地址", "配送地址")):
-            self._address_failure("shipping_address_entry_missing", "提交订单页未打开公共地址簿")
+            self._address_failure("shipping_address_entry_missing", "提交订单页未打开公共地址簿", data)
         if policy is not AddressPolicy.ADD and data.match:
             if self.select_existing_shipping_address(data.match):
                 return self.verify_shipping_address_applied(data)
             if policy is AddressPolicy.EXISTING:
-                self._address_failure("shipping_address_match_missing", "公共地址簿未找到匹配地址")
+                self._address_failure("shipping_address_match_missing", "公共地址簿未找到匹配地址", data)
         self.add_shipping_address(data)
+        if self._is_checkout_page():
+            return self.verify_shipping_address_applied(data)
         if not self.select_existing_shipping_address(data.match or data.phone[-4:]):
-            self._address_failure("shipping_address_saved_missing", "新增地址保存后未在公共地址簿中找到")
+            self._address_failure("shipping_address_saved_missing", "新增地址保存后未在公共地址簿中找到", data)
         return self.verify_shipping_address_applied(data)
 
     def select_existing_shipping_address(self, match: str) -> bool:
@@ -66,12 +68,15 @@ class ShippingAddressMixin:
         return False
 
     def add_shipping_address(self, data: AddressData) -> bool:
+        missing = data.missing_for_add()
+        if missing:
+            raise ValueError("新增地址缺少字段: " + ",".join(missing))
         if not self._click_text(("新增地址", "添加地址")):
-            self._address_failure("shipping_address_add_missing", "公共地址簿未提供新增地址入口")
+            self._address_failure("shipping_address_add_missing", "公共地址簿未提供新增地址入口", data)
         if not self._click_text((data.country,)):
-            self._address_failure("shipping_address_country_missing", "地址表单未找到国家")
+            self._address_failure("shipping_address_country_missing", "地址表单未找到国家", data)
         if not self._click_text((data.city,)):
-            self._address_failure("shipping_address_city_missing", "地址表单未找到城市")
+            self._address_failure("shipping_address_city_missing", "地址表单未找到城市", data)
         for labels, value in (
             (("联系人", "姓名"), data.name),
             (("手机号码", "手机号", "联系电话"), data.phone),
@@ -79,11 +84,11 @@ class ShippingAddressMixin:
             (("邮政编码", "邮编"), data.postcode),
         ):
             if not self._type_field(labels, value):
-                self._address_failure("shipping_address_field_missing", "地址表单字段不可填写")
+                self._address_failure("shipping_address_field_missing", "地址表单字段不可填写", data)
         if not self._click_text(("保存",)):
-            self._address_failure("shipping_address_save_missing", "地址表单未提供保存入口")
+            self._address_failure("shipping_address_save_missing", "地址表单未提供保存入口", data)
         if not self._wait_until(self._is_address_list_or_checkout):
-            self._address_failure("shipping_address_save_timeout", "地址表单保存后未返回地址簿或提交订单页")
+            self._address_failure("shipping_address_save_timeout", "地址表单保存后未返回地址簿或提交订单页", data)
         return True
 
     def verify_shipping_address_applied(self, data: AddressData) -> bool:
@@ -92,7 +97,7 @@ class ShippingAddressMixin:
         if any(marker in blob for marker in ("请选择地址", "请选择收货地址")) or sum(
             value in blob for value in stable
         ) < 2:
-            self._address_failure("shipping_address_verify_failed", "公共地址选择后未稳定回填到提交订单页")
+            self._address_failure("shipping_address_verify_failed", "公共地址选择后未稳定回填到提交订单页", data)
         logger.info(
             "公共地址已应用 policy_match=%s phone=%s city=%s",
             bool(data.match),
@@ -102,7 +107,13 @@ class ShippingAddressMixin:
         return True
 
     def _is_address_list_or_checkout(self) -> bool:
-        return any(marker in self.page_blob() for marker in ("选择收货地址", "新增地址", "提交订单"))
+        return self._is_address_list() or self._is_checkout_page()
+
+    def _is_address_list(self) -> bool:
+        return "选择收货地址" in self.page_blob()
+
+    def _is_checkout_page(self) -> bool:
+        return "提交订单" in self.page_blob() and "选择收货地址" not in self.page_blob()
 
     def _scroll_address_list_once(self) -> None:
         try:
@@ -122,6 +133,12 @@ class ShippingAddressMixin:
             logger.debug("Shipping address list scroll failed error_type=%s", type(exc).__name__)
         time.sleep(0.1)
 
-    def _address_failure(self, stage: str, message: str) -> None:
-        self.capture_shipping_failure(stage, sensitive=True)
+    def _address_failure(self, stage: str, message: str, data: AddressData) -> None:
+        self.capture_shipping_failure(
+            stage, sensitive=True, redact_values=self._address_redaction_values(data)
+        )
         raise AssertionError(message)
+
+    @staticmethod
+    def _address_redaction_values(data: AddressData) -> tuple[str, ...]:
+        return (data.name, data.phone, data.country, data.city, data.detail, data.postcode)

@@ -178,13 +178,16 @@ class ShippingPage(ShippingAddressMixin):
         )
         return re.sub(r"[^a-z0-9_-]+", "_", redacted.lower())[:80].strip("_") or "failure"
 
-    def capture_shipping_failure(self, stage: str, sensitive: bool = False) -> None:
+    def capture_shipping_failure(
+        self, stage: str, sensitive: bool = False, redact_values=()
+    ) -> None:
         safe_stage = self._safe_failure_stage(stage)
         artifacts = capture_failure(
             self.driver,
             safe_stage,
             AppConfig.ARTIFACTS_DIR,
             include_screenshot=not sensitive,
+            redact_values=redact_values,
         )
         logger.error(
             "Shipping flow failed stage=%s screenshot=%s page_source=%s",

@@ -115,6 +115,8 @@ class FakeAddressShippingDriver(FakeShippingDriver):
         self.address_book = list(address_book)
         self.selected_address = ""
         self.address_form_values = {}
+        self.save_applies_directly = False
+        self.address_searches = 0
         self.page_source = "提交订单 请选择收货地址"
 
     @classmethod
@@ -143,7 +145,10 @@ class FakeAddressShippingDriver(FakeShippingDriver):
             detail=values.get("detail", ""),
         ).strip()
         self.address_book.append(address)
-        self._show_address_book()
+        if self.save_applies_directly:
+            self._select_address(address)
+        else:
+            self._show_address_book()
 
     def find_elements(self, by, value):
         exact_labels = {
@@ -163,8 +168,16 @@ class FakeAddressShippingDriver(FakeShippingDriver):
                 self, "添加地址", self._show_address_form
             ),
             self._text_selector("保存"): FakeAddressElement(self, "保存", self._save_address),
-            self._text_selector("菲律宾"): FakeAddressElement(self, "菲律宾"),
-            self._text_selector("Manila"): FakeAddressElement(self, "Manila"),
+            self._text_selector("菲律宾"): FakeAddressElement(
+                self,
+                "菲律宾",
+                lambda: self.address_form_values.__setitem__("country", "菲律宾"),
+            ),
+            self._text_selector("Manila"): FakeAddressElement(
+                self,
+                "Manila",
+                lambda: self.address_form_values.__setitem__("city", "Manila"),
+            ),
         }
         if value in exact_labels:
             element = exact_labels[value]
@@ -176,6 +189,7 @@ class FakeAddressShippingDriver(FakeShippingDriver):
                 return [element]
             return []
         if self.screen == "address_book" and "contains(@text" in value:
+            self.address_searches += 1
             requested = re.findall(r'contains\(@(?:text|content-desc),"([^"]+)"\)', value)
             return [
                 FakeAddressElement(self, address, lambda a=address: self._select_address(a))
@@ -242,12 +256,34 @@ def test_auto_adds_when_matching_address_is_absent():
     assert driver.address_form_values["phone"] == "+639621170994"
 
 
+def test_public_add_rejects_incomplete_data_before_clicking_address_form():
+    driver = FakeAddressShippingDriver()
+
+    with pytest.raises(ValueError, match="phone,country,city,detail,postcode"):
+        ShippingPage(driver).add_shipping_address(AddressData(name="Tester"))
+
+    assert driver.clicks == []
+
+
+def test_auto_verifies_an_address_saved_directly_to_checkout_without_reselecting():
+    driver = FakeAddressShippingDriver.with_address_book(["Other +63******0000 Cebu"])
+    driver.save_applies_directly = True
+
+    assert ShippingPage(driver).ensure_shipping_address(AddressPolicy.AUTO, complete_address()) is True
+    assert driver.selected_address.endswith("Manila 100 Test Street")
+    assert driver.address_searches == 4
+
+
 def test_address_form_failures_capture_sensitive_diagnostics(monkeypatch):
     driver = FakeAddressShippingDriver()
     page = ShippingPage(driver)
     calls = []
     monkeypatch.setattr(
-        page, "capture_shipping_failure", lambda stage, sensitive=False: calls.append((stage, sensitive))
+        page,
+        "capture_shipping_failure",
+        lambda stage, sensitive=False, redact_values=(): calls.append(
+            (stage, sensitive, redact_values)
+        ),
     )
 
     with pytest.raises(AssertionError, match="未找到国家"):
@@ -255,7 +291,13 @@ def test_address_form_failures_capture_sensitive_diagnostics(monkeypatch):
             AddressPolicy.ADD, complete_address(country="不存在的国家")
         )
 
-    assert calls == [("shipping_address_country_missing", True)]
+    assert calls == [
+        (
+            "shipping_address_country_missing",
+            True,
+            ("Tester", "+639621170994", "不存在的国家", "Manila", "100 Test Street", "1000"),
+        )
+    ]
 
 
 def test_applied_address_logs_a_masked_phone_without_detail(monkeypatch):
@@ -277,7 +319,7 @@ def _record_capture(monkeypatch):
 
     calls = CaptureCalls()
 
-    def capture(driver, stage, artifacts_dir, include_screenshot=True):
+    def capture(driver, stage, artifacts_dir, include_screenshot=True, redact_values=()):
         calls.append((driver, stage, artifacts_dir, include_screenshot))
         artifacts = SimpleNamespace(
             screenshot=f"artifacts/{stage}.png" if include_screenshot else None,
