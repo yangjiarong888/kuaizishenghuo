@@ -32,8 +32,13 @@ class ShippingPaymentMixin:
     )
     _PAYMENT_PASSWORD_SELECTOR = (
         '//android.widget.EditText['
-        'contains(@resource-id,"pay") or contains(@resource-id,"password") '
-        'or @password="true" or contains(@hint,"支付密码")]'
+        '@resource-id="shipping_payment_password" '
+        'or @resource-id="pay_password" '
+        'or contains(@resource-id,"password") '
+        'or contains(@resource-id,"passcode") '
+        'or contains(@resource-id,"pwd") '
+        'or @password="true" '
+        'or contains(@hint,"支付密码")]'
     )
     _ORDER_NUMBER = re.compile(
         r"(?:订单号|订单编号|order(?:\s*number|\s*no\.?)?)\s*[:：#]?\s*([A-Za-z0-9-]{4,})",

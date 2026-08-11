@@ -113,6 +113,7 @@ class FakeShippingDriver:
         self.sent_values = []
         self.password_field_available = True
         self.decoy_edit_text_available = False
+        self.decoy_payment_resource_ids = ()
         self.password_send_mutates_page = False
         self.password_send_raises = False
         self.balance_payment_completes = True
@@ -236,6 +237,18 @@ class FakeShippingDriver:
         if self.screen == "balance_password" and "android.widget.EditText" in value:
             if "|//android.widget.EditText" in value and self.decoy_edit_text_available:
                 return [FakePaymentField(self, "备注")]
+            if (
+                self.decoy_payment_resource_ids
+                and 'contains(@resource-id,"pay")' in value
+            ):
+                resource_id = self.decoy_payment_resource_ids[0]
+                return [
+                    FakePaymentField(
+                        self,
+                        "付款备注",
+                        attributes={"resource-id": resource_id},
+                    )
+                ]
             if self.password_field_available:
                 return [
                     FakePaymentField(
@@ -905,6 +918,20 @@ def test_balance_payment_rejects_decoy_edit_text_without_typing_password():
     driver = FakeShippingDriver.on_payment_page()
     driver.password_field_available = False
     driver.decoy_edit_text_available = True
+
+    with pytest.raises(AssertionError, match="支付密码弹窗未找到输入框"):
+        ShippingPage(driver).pay_balance("safe-password")
+
+    assert driver.sent_values == []
+
+
+@pytest.mark.parametrize("resource_id", ("payment_note", "payment_amount"))
+def test_balance_payment_rejects_pay_named_decoy_resource_id_without_typing_password(
+    resource_id,
+):
+    driver = FakeShippingDriver.on_payment_page()
+    driver.password_field_available = False
+    driver.decoy_payment_resource_ids = (resource_id,)
 
     with pytest.raises(AssertionError, match="支付密码弹窗未找到输入框"):
         ShippingPage(driver).pay_balance("safe-password")
