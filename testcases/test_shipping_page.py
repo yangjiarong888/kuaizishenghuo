@@ -1,4 +1,5 @@
 import re
+from datetime import date
 from types import SimpleNamespace
 
 import pytest
@@ -11,16 +12,39 @@ from pages.shipping_types import AddressData, AddressPolicy
 
 
 class FakeElement:
-    def __init__(self, driver, text="", on_click=None):
+    def __init__(
+        self,
+        driver,
+        text="",
+        on_click=None,
+        *,
+        enabled=True,
+        clickable="true",
+        content_desc="",
+        attributes=None,
+    ):
         self.driver = driver
         self.text = text
         self.on_click = on_click
+        self.enabled = enabled
+        self.clickable = clickable
+        self.content_desc = content_desc
+        self.attributes = attributes or {}
 
     def is_displayed(self):
         return True
 
     def is_enabled(self):
-        return True
+        return self.enabled
+
+    def get_attribute(self, name):
+        values = {
+            "text": self.text,
+            "content-desc": self.content_desc,
+            "enabled": "true" if self.enabled else "false",
+            "clickable": self.clickable,
+        }
+        return self.attributes.get(name, values.get(name, ""))
 
     def click(self):
         self.driver.clicks.append(self.text)
@@ -40,12 +64,49 @@ class FakeShippingDriver:
         self.entry_available = True
         self.delivery_available = True
         self.home_available = True
+        self.delivery_slots = []
+        self.pending_delivery_slot = ""
+
+    @classmethod
+    def with_delivery_dates(cls, labels, disabled_labels=()):
+        driver = cls()
+        driver.screen = "checkout"
+        driver.page_source = "提交订单 预约配送"
+        disabled = set(disabled_labels)
+        driver.delivery_slots = [
+            FakeElement(
+                driver,
+                label,
+                lambda selected=label: driver._select_delivery_slot(selected),
+                enabled=label not in disabled,
+                clickable="true" if label not in disabled else "false",
+                attributes={"class": "disabled" if label in disabled else ""},
+            )
+            for label in labels
+        ]
+        return driver
+
+    @classmethod
+    def with_checkout_delivery_text(cls, label):
+        driver = cls()
+        driver.screen = "checkout"
+        driver.page_source = f"提交订单 预约配送 {label}"
+        return driver
 
     @staticmethod
     def _text_selector(label):
         return f'//*[@text="{label}" or @content-desc="{label}"]'
 
     def find_elements(self, by, value):
+        if self.screen == "checkout" and value == self._text_selector("预约配送"):
+            return [FakeElement(self, "预约配送", self._show_delivery_picker)]
+        if self.screen == "delivery_picker" and value in {
+            self._text_selector("确定"),
+            self._text_selector("确认"),
+        }:
+            return [FakeElement(self, "确定", self._confirm_delivery_slot)]
+        if self.screen == "delivery_picker" and value == "//*[@text or @content-desc]":
+            return self.delivery_slots
         if (
             self.screen == "app_home"
             and self.entry_available
@@ -64,6 +125,17 @@ class FakeShippingDriver:
         }:
             return [FakeElement(self, "首页", self.home_action)]
         return []
+
+    def _show_delivery_picker(self):
+        self.screen = "delivery_picker"
+        self.page_source = "预约配送 " + " ".join(slot.text for slot in self.delivery_slots)
+
+    def _select_delivery_slot(self, label):
+        self.pending_delivery_slot = label
+
+    def _confirm_delivery_slot(self):
+        self.screen = "checkout"
+        self.page_source = f"提交订单 预约配送 {self.pending_delivery_slot}"
 
     def _show_shipping_home(self):
         self.screen = "shipping_home"
@@ -215,6 +287,76 @@ def complete_address(**overrides):
     }
     values.update(overrides)
     return AddressData(**values)
+
+
+def test_device_today_uses_appium_device_clock():
+    driver = FakeShippingDriver()
+    driver.get_device_time = lambda: "2026-08-10T21:30:00+08:00"
+
+    assert ShippingPage(driver).device_today() == date(2026, 8, 10)
+
+
+def test_device_today_fails_closed_when_clock_is_unavailable():
+    driver = FakeShippingDriver()
+    driver.get_device_time = lambda: (_ for _ in ()).throw(RuntimeError("offline"))
+
+    with pytest.raises(AssertionError, match="无法读取设备日期"):
+        ShippingPage(driver).device_today()
+
+
+def test_delivery_picker_selects_earliest_future_not_today():
+    driver = FakeShippingDriver.with_delivery_dates(
+        ["今天 19:15-19:45", "8月12日 20:15-20:45", "明天 19:45-20:15"]
+    )
+
+    selected = ShippingPage(driver).select_earliest_future_delivery(today=date(2026, 8, 10))
+
+    assert selected == date(2026, 8, 11)
+    assert "明天 19:45-20:15" in driver.clicks
+    assert "今天 19:15-19:45" not in driver.clicks
+
+
+def test_delivery_picker_rejects_disabled_earlier_future_slot():
+    driver = FakeShippingDriver.with_delivery_dates(
+        ["明天 19:15-19:45", "后天 19:45-20:15"], disabled_labels={"明天 19:15-19:45"}
+    )
+
+    selected = ShippingPage(driver).select_earliest_future_delivery(today=date(2026, 8, 10))
+
+    assert selected == date(2026, 8, 12)
+    assert "后天 19:45-20:15" in driver.clicks
+    assert "明天 19:15-19:45" not in driver.clicks
+
+
+def test_delivery_picker_rejects_boolean_false_clickable_slot():
+    driver = FakeShippingDriver.with_delivery_dates(
+        ["明天 19:15-19:45", "后天 19:45-20:15"]
+    )
+    driver.delivery_slots[0].clickable = False
+
+    selected = ShippingPage(driver).select_earliest_future_delivery(today=date(2026, 8, 10))
+
+    assert selected == date(2026, 8, 12)
+    assert "后天 19:45-20:15" in driver.clicks
+    assert "明天 19:15-19:45" not in driver.clicks
+
+
+def test_delivery_readback_rejects_today_after_picker_click():
+    driver = FakeShippingDriver.with_checkout_delivery_text("8月10日 19:15-19:45")
+
+    with pytest.raises(AssertionError, match="严格晚于今天"):
+        ShippingPage(driver).verify_selected_delivery_date(
+            date(2026, 8, 10), date(2026, 8, 10)
+        )
+
+
+def test_delivery_readback_rejects_unparseable_text():
+    driver = FakeShippingDriver.with_checkout_delivery_text("已预约")
+
+    with pytest.raises(AssertionError, match="无法解析"):
+        ShippingPage(driver).verify_selected_delivery_date(
+            date(2026, 8, 11), date(2026, 8, 10)
+        )
 
 
 def test_existing_policy_requires_match_before_clicking():
