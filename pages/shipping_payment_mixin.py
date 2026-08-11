@@ -33,14 +33,21 @@ class ShippingPaymentMixin:
     _PAYMENT_PASSWORD_SELECTOR = (
         '//android.widget.EditText['
         'contains(@resource-id,"pay") or contains(@resource-id,"password") '
-        'or @password="true" or contains(@hint,"支付密码")] '
-        '|//android.widget.EditText'
+        'or @password="true" or contains(@hint,"支付密码")]'
     )
     _ORDER_NUMBER = re.compile(
         r"(?:订单号|订单编号|order(?:\s*number|\s*no\.?)?)\s*[:：#]?\s*([A-Za-z0-9-]{4,})",
         re.IGNORECASE,
     )
     _DELIVERABLE_MARKERS = ("可配送", "可提交", "可寄件", "可下单")
+    _HISTORICAL_PACKAGE_MARKERS = ("历史订单", "已完成", "已取消")
+    _PACKAGE_CONTAINER_SELECTOR = (
+        '//*[contains(@resource-id,"shipping_package_card") '
+        'or contains(@resource-id,"shipping_package") '
+        'or contains(@resource-id,"delivery_package") '
+        'or @content-desc="寄件包裹"]'
+    )
+    _PACKAGE_ACTION_LABELS = ("去寄件", "立即寄件", "去配送", "提交订单")
 
     def submit_order_once(self) -> str | None:
         """Submit the checkout exactly once for this page object instance."""
@@ -75,7 +82,9 @@ class ShippingPaymentMixin:
         try:
             field.send_keys(pay_password)
         except Exception as exc:
-            self._payment_failure("balance_password_entry_failed")
+            self._payment_failure(
+                "balance_password_entry_failed", redact_values=(pay_password,)
+            )
             raise AssertionError("支付密码输入失败") from exc
         self._click_payment_text(
             ("确定", "确认"),
@@ -166,7 +175,9 @@ class ShippingPaymentMixin:
     def open_first_deliverable_package(self) -> bool:
         """Open only a package explicitly marked available for shipping submission."""
         try:
-            candidates = self.driver.find_elements(AppiumBy.XPATH, "//*[@text or @content-desc]")
+            candidates = self.driver.find_elements(
+                AppiumBy.XPATH, self._PACKAGE_CONTAINER_SELECTOR
+            )
         except Exception as exc:
             logger.debug("Shipping package lookup failed error_type=%s", type(exc).__name__)
             candidates = []
@@ -175,12 +186,23 @@ class ShippingPaymentMixin:
                 marker_text = self._element_blob(candidate)
                 if not candidate.is_displayed() or not candidate.is_enabled():
                     continue
+                if any(marker in marker_text for marker in self._HISTORICAL_PACKAGE_MARKERS):
+                    continue
                 if not any(marker in marker_text for marker in self._DELIVERABLE_MARKERS):
                     continue
-                candidate.click()
-                return True
+                action = self._first_package_action(candidate)
+                if action is None:
+                    continue
             except Exception as exc:
                 logger.debug("Shipping package selection failed error_type=%s", type(exc).__name__)
+                continue
+            try:
+                action.click()
+            except Exception as exc:
+                raise AssertionError("可配送包裹操作点击失败") from exc
+            if self._wait_until(self._is_package_checkout):
+                return True
+            raise AssertionError("可配送包裹操作后未进入提交订单页")
         raise AssertionError("未找到明确标记可配送或可提交的包裹")
 
     def verify_checkout_ready(self) -> bool:
@@ -257,6 +279,30 @@ class ShippingPaymentMixin:
 
     def _payment_password_field(self):
         return self._first_displayed(AppiumBy.XPATH, self._PAYMENT_PASSWORD_SELECTOR)
+
+    def _first_package_action(self, container):
+        for label in self._PACKAGE_ACTION_LABELS:
+            try:
+                actions = container.find_elements(
+                    AppiumBy.XPATH,
+                    f'.//*[@text="{label}" or @content-desc="{label}"]',
+                )
+            except Exception as exc:
+                logger.debug("Shipping package action lookup failed error_type=%s", type(exc).__name__)
+                continue
+            for action in actions:
+                try:
+                    if action.is_displayed() and action.is_enabled():
+                        return action
+                except Exception as exc:
+                    logger.debug(
+                        "Shipping package action visibility failed error_type=%s",
+                        type(exc).__name__,
+                    )
+        return None
+
+    def _is_package_checkout(self) -> bool:
+        return "提交订单" in self.page_blob() and not self._is_delivery_orders_page()
 
     def _click_payment_text(
         self,
