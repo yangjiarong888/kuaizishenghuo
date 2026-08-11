@@ -35,6 +35,7 @@ class ShippingDeliveryMixin:
     _TIME_RANGE = re.compile(
         r"(?:[01]?\d|2[0-3]):[0-5]\d\s*[-~至]\s*(?:[01]?\d|2[0-3]):[0-5]\d"
     )
+    _DELIVERY_TRANSITION_TIMEOUT = 1
 
     def device_today(self) -> date:
         """Read the device clock without ever falling back to the host clock."""
@@ -49,7 +50,9 @@ class ShippingDeliveryMixin:
         base = today if today is not None else self.device_today()
         if not self._click_text(self._DELIVERY_OPENERS):
             raise AssertionError("提交订单页未打开配送时间选择器")
-        if not self._wait_until(self._is_delivery_picker_open, timeout=1):
+        if not self._wait_until(
+            self._is_delivery_picker_open, timeout=self._DELIVERY_TRANSITION_TIMEOUT
+        ):
             raise AssertionError("配送时间选择器未打开")
 
         elements = self._picker_slot_elements()
@@ -68,17 +71,7 @@ class ShippingDeliveryMixin:
                 and not self._is_time_range(self._element_blob(element))
             ]
             chosen_date = self._select_earliest_future_date(date_controls, base)
-            time_control = next(
-                (
-                    element
-                    for element in self._picker_slot_elements()
-                    if self._is_time_range(self._element_blob(element))
-                    and self._element_enabled(element)
-                ),
-                None,
-            )
-            if time_control is None:
-                raise AssertionError("未找到可选配送时段")
+            time_control = self._wait_for_enabled_time_slot()
             self._click_delivery_element(time_control, "配送时段")
         self._confirm_or_verify_picker_auto_closed()
         self.verify_selected_delivery_date(chosen_date, base)
@@ -150,12 +143,41 @@ class ShippingDeliveryMixin:
         )
 
     def _confirm_or_verify_picker_auto_closed(self) -> None:
-        if self._wait_until(self._is_checkout_rendered, timeout=0):
+        if self._wait_until(
+            self._is_checkout_rendered, timeout=self._DELIVERY_TRANSITION_TIMEOUT
+        ):
             return
         if not self._click_text(("确定", "确认")):
             raise AssertionError("未找到配送时间确认按钮")
-        if not self._wait_until(self._is_checkout_rendered, timeout=1):
+        if not self._wait_until(
+            self._is_checkout_rendered, timeout=self._DELIVERY_TRANSITION_TIMEOUT
+        ):
             raise AssertionError("确认后未返回提交订单页")
+
+    def _wait_for_enabled_time_slot(self):
+        time_control = None
+
+        def time_slot_ready():
+            nonlocal time_control
+            time_control = self._first_enabled_time_slot()
+            return time_control is not None
+
+        if self._wait_until(time_slot_ready, timeout=self._DELIVERY_TRANSITION_TIMEOUT):
+            return time_control
+        if not self._is_delivery_picker_open():
+            raise AssertionError("选择日期后配送时间选择器已关闭")
+        raise AssertionError("选择日期后未出现可选配送时段")
+
+    def _first_enabled_time_slot(self):
+        return next(
+            (
+                element
+                for element in self._picker_slot_elements()
+                if self._is_time_range(self._element_blob(element))
+                and self._element_enabled(element)
+            ),
+            None,
+        )
 
     def _element_enabled(self, element) -> bool:
         try:

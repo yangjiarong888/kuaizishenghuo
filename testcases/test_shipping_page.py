@@ -54,6 +54,7 @@ class FakeElement:
 
 class FakeShippingDriver:
     def __init__(self):
+        self._page_source = ""
         self.screen = "app_home"
         self.clicks = []
         self.page_source = "筷子生活 首页 国际货运"
@@ -67,11 +68,32 @@ class FakeShippingDriver:
         self.delivery_slots = []
         self.delivery_date_controls = []
         self.delivery_time_controls = []
+        self.delayed_time_controls = []
+        self.time_slots_visible_after_checks = None
+        self.time_slot_checks = 0
         self.unrelated_picker_elements = []
         self.pending_delivery_slot = ""
         self.checkout_delivery_text = ""
         self.confirm_available = True
         self.confirm_responsive = True
+        self.auto_close_after_checks = None
+        self.auto_close_checks = 0
+
+    @property
+    def page_source(self):
+        if (
+            self.screen == "delivery_picker"
+            and self.pending_delivery_slot
+            and self.auto_close_after_checks is not None
+        ):
+            self.auto_close_checks += 1
+            if self.auto_close_checks >= self.auto_close_after_checks:
+                self._confirm_delivery_slot()
+        return self._page_source
+
+    @page_source.setter
+    def page_source(self, value):
+        self._page_source = value
 
     @classmethod
     def with_delivery_dates(cls, labels, disabled_labels=(), time_ranges=()):
@@ -149,7 +171,12 @@ class FakeShippingDriver:
                 + self.delivery_time_controls
             )
         if self.screen == "delivery_picker" and "resource-id" in value:
-            return self.delivery_slots + self.delivery_date_controls + self.delivery_time_controls
+            time_controls = self.delivery_time_controls
+            if self.pending_delivery_slot and self.delayed_time_controls:
+                self.time_slot_checks += 1
+                if self.time_slot_checks >= self.time_slots_visible_after_checks:
+                    time_controls = time_controls + self.delayed_time_controls
+            return self.delivery_slots + self.delivery_date_controls + time_controls
         if self.screen == "checkout" and "resource-id" in value and self.checkout_delivery_text:
             return [
                 FakeElement(
@@ -444,6 +471,37 @@ def test_delivery_picker_selects_date_then_first_enabled_time_range():
     assert selected == date(2026, 8, 11)
     assert "明天" in driver.clicks
     assert "19:15-19:45" in driver.clicks
+
+
+def test_delivery_picker_waits_for_time_range_after_date_selection():
+    driver = FakeShippingDriver.with_delivery_dates(["明天"])
+    driver.delayed_time_controls = [
+        FakeElement(
+            driver,
+            "19:15-19:45",
+            lambda: driver._select_delivery_slot("19:15-19:45"),
+            attributes={"resource-id": "shipping_delivery_slot"},
+        )
+    ]
+    driver.time_slots_visible_after_checks = 2
+
+    selected = ShippingPage(driver).select_earliest_future_delivery(today=date(2026, 8, 10))
+
+    assert selected == date(2026, 8, 11)
+    assert "19:15-19:45" in driver.clicks
+    assert driver.time_slot_checks >= 2
+
+
+def test_delivery_picker_waits_for_delayed_auto_close_before_confirming():
+    driver = FakeShippingDriver.with_delivery_dates(["明天 19:15-19:45"])
+    driver.confirm_available = False
+    driver.auto_close_after_checks = 3
+
+    selected = ShippingPage(driver).select_earliest_future_delivery(today=date(2026, 8, 10))
+
+    assert selected == date(2026, 8, 11)
+    assert driver.screen == "checkout"
+    assert driver.auto_close_checks >= 3
 
 
 @pytest.mark.parametrize(
