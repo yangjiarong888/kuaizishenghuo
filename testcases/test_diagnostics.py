@@ -92,7 +92,7 @@ def test_capture_failure_redacts_explicit_sensitive_values_from_xml(tmp_path):
 
     driver = FakeDriver()
     driver.page_source = (
-        '<node text="Tester Manila 100 Test Street 1000" content-desc="+639621170994" />'
+        '<node text="Tester residence Tester Manila 100 Test Street 1000" content-desc="+639621170994" />'
     )
 
     artifacts = capture_failure(
@@ -101,6 +101,7 @@ def test_capture_failure_redacts_explicit_sensitive_values_from_xml(tmp_path):
         artifacts_dir=tmp_path,
         include_screenshot=False,
         redact_values=(
+            "Tester residence",
             "Tester",
             "+639621170994",
             "菲律宾",
@@ -111,6 +112,14 @@ def test_capture_failure_redacts_explicit_sensitive_values_from_xml(tmp_path):
     )
 
     xml = artifacts.page_source.read_text(encoding="utf-8")
-    for value in ("Tester", "+639621170994", "菲律宾", "Manila", "100 Test Street", "1000"):
+    for value in (
+        "Tester residence",
+        "Tester",
+        "+639621170994",
+        "菲律宾",
+        "Manila",
+        "100 Test Street",
+        "1000",
+    ):
         assert value not in xml
     assert "<redacted>" in xml

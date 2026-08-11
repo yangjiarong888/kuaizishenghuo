@@ -141,4 +141,12 @@ class ShippingAddressMixin:
 
     @staticmethod
     def _address_redaction_values(data: AddressData) -> tuple[str, ...]:
-        return (data.name, data.phone, data.country, data.city, data.detail, data.postcode)
+        return (
+            data.match,
+            data.name,
+            data.phone,
+            data.country,
+            data.city,
+            data.detail,
+            data.postcode,
+        )

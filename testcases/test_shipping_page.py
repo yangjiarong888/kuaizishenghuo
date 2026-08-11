@@ -295,7 +295,15 @@ def test_address_form_failures_capture_sensitive_diagnostics(monkeypatch):
         (
             "shipping_address_country_missing",
             True,
-            ("Tester", "+639621170994", "不存在的国家", "Manila", "100 Test Street", "1000"),
+            (
+                "0994",
+                "Tester",
+                "+639621170994",
+                "不存在的国家",
+                "Manila",
+                "100 Test Street",
+                "1000",
+            ),
         )
     ]
 
