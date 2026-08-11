@@ -9,9 +9,10 @@ from commons.diagnostics import capture_failure
 from .app_common import AppConfig, logger
 from .shipping_address_mixin import ShippingAddressMixin
 from .shipping_delivery_mixin import ShippingDeliveryMixin
+from .shipping_payment_mixin import ShippingPaymentMixin
 
 
-class ShippingPage(ShippingDeliveryMixin, ShippingAddressMixin):
+class ShippingPage(ShippingPaymentMixin, ShippingDeliveryMixin, ShippingAddressMixin):
     """Navigation and diagnostics facade for the international shipping flow."""
 
     SHIPPING_TITLE = "国际货运"

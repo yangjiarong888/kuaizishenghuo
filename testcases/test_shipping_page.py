@@ -8,7 +8,12 @@ import pages.shipping_address_mixin as shipping_address_mixin_module
 import pages.shipping_page as shipping_page_module
 
 from pages.shipping_page import ShippingPage
-from pages.shipping_types import AddressData, AddressPolicy
+from pages.shipping_types import (
+    AddressData,
+    AddressPolicy,
+    OrderPaymentState,
+    PaymentMethod,
+)
 
 
 class FakeElement:
@@ -52,6 +57,11 @@ class FakeElement:
             self.on_click()
 
 
+class FakePaymentField(FakeElement):
+    def send_keys(self, value):
+        self.driver.sent_values.append(value)
+
+
 class FakeShippingDriver:
     def __init__(self):
         self._page_source = ""
@@ -78,6 +88,8 @@ class FakeShippingDriver:
         self.confirm_responsive = True
         self.auto_close_after_checks = None
         self.auto_close_checks = 0
+        self.keep_submit_button_visible = False
+        self.sent_values = []
 
     @property
     def page_source(self):
@@ -138,6 +150,27 @@ class FakeShippingDriver:
         driver.page_source = f"提交订单 预约配送 {label}"
         return driver
 
+    @classmethod
+    def on_submit_page(cls):
+        driver = cls()
+        driver.screen = "checkout"
+        driver.page_source = "提交订单 已选择地址 明天 19:15-19:45"
+        return driver
+
+    @classmethod
+    def on_payment_page(cls):
+        driver = cls()
+        driver._show_payment_page()
+        return driver
+
+    @classmethod
+    def on_order_detail(cls, payment_status):
+        driver = cls()
+        driver.screen = "order_detail"
+        driver.payment_status = payment_status
+        driver.page_source = f"订单详情 {payment_status}"
+        return driver
+
     @staticmethod
     def _is_time_range(label):
         return bool(re.search(r"\d{2}:\d{2}\s*-\s*\d{2}:\d{2}", label)) and not any(
@@ -155,6 +188,40 @@ class FakeShippingDriver:
         return f'//*[@text="{label}" or @content-desc="{label}"]'
 
     def find_elements(self, by, value):
+        if (
+            (self.screen == "checkout" or self.keep_submit_button_visible)
+            and value == self._text_selector("提交订单")
+        ):
+            return [FakeElement(self, "提交订单", self._show_payment_page)]
+        if self.screen == "payment" and value == self._text_selector("余额支付"):
+            return [FakeElement(self, "余额支付", self._select_balance)]
+        if self.screen == "payment" and value == self._text_selector("余额"):
+            return [FakeElement(self, "余额", self._select_balance)]
+        if self.screen == "payment" and value == self._text_selector("货到付款"):
+            return [FakeElement(self, "货到付款", self._select_cod)]
+        if self.screen == "payment" and value in {
+            self._text_selector("确认支付"),
+            self._text_selector("立即支付"),
+            self._text_selector("确认选择"),
+            self._text_selector("确定"),
+            self._text_selector("确认"),
+        }:
+            return [FakeElement(self, "确认支付", self._confirm_payment_selection)]
+        if self.screen == "balance_password" and "android.widget.EditText" in value:
+            return [FakePaymentField(self, "支付密码")]
+        if self.screen == "balance_password" and value in {
+            self._text_selector("确定"),
+            self._text_selector("确认"),
+        }:
+            return [FakeElement(self, "确定", self._complete_balance_payment)]
+        if self.screen == "order_detail" and value == self._text_selector("取消支付"):
+            if self.payment_status == "待支付":
+                return [FakeElement(self, "取消支付", self._show_cancel_confirmation)]
+        if self.screen == "cancel_confirmation" and value in {
+            self._text_selector("确定"),
+            self._text_selector("确认取消"),
+        }:
+            return [FakeElement(self, "确定", self._cancel_payment)]
         if self.screen == "checkout" and value == self._text_selector("预约配送"):
             return [FakeElement(self, "预约配送", self._show_delivery_picker)]
         if self.screen == "delivery_picker" and self.confirm_available and value in {
@@ -215,6 +282,40 @@ class FakeShippingDriver:
                 + self.delivery_time_controls
             )
         )
+
+    def _show_payment_page(self):
+        self.screen = "payment"
+        self.selected_payment_method = ""
+        self.page_source = "支付方式"
+
+    def _select_balance(self):
+        self.selected_payment_method = "balance"
+
+    def _select_cod(self):
+        self.selected_payment_method = "cod"
+
+    def _confirm_payment_selection(self):
+        if self.selected_payment_method == "balance":
+            self.screen = "balance_password"
+            self.page_source = "请输入支付密码"
+        elif self.selected_payment_method == "cod":
+            self.screen = "order_detail"
+            self.payment_status = "货到付款"
+            self.page_source = "订单详情 货到付款"
+
+    def _complete_balance_payment(self):
+        self.screen = "order_detail"
+        self.payment_status = "已支付"
+        self.page_source = "订单详情 已支付"
+
+    def _show_cancel_confirmation(self):
+        self.screen = "cancel_confirmation"
+        self.page_source = "确认取消支付"
+
+    def _cancel_payment(self):
+        self.screen = "order_detail"
+        self.payment_status = "已取消"
+        self.page_source = "订单详情 已取消"
 
     def _select_delivery_slot(self, label):
         if self._is_time_range(label) and self.pending_delivery_slot:
@@ -685,6 +786,137 @@ def test_shipping_tabs_switch_both_directions():
     assert driver.screen == "delivery_orders"
     assert page.switch_to_shipping_home() is True
     assert driver.screen == "shipping_home"
+
+
+def test_submit_order_clicks_once_even_if_button_remains_visible():
+    driver = FakeShippingDriver.on_submit_page()
+    driver.keep_submit_button_visible = True
+    page = ShippingPage(driver)
+
+    page.submit_order_once()
+    page.submit_order_once()
+
+    assert driver.clicks.count("提交订单") == 1
+
+
+def test_balance_payment_requires_password_before_typing():
+    driver = FakeShippingDriver.on_payment_page()
+
+    with pytest.raises(ValueError, match="SHIPPING_PAY_PASSWORD"):
+        ShippingPage(driver).pay_balance("")
+
+    assert driver.sent_values == []
+
+
+def test_paid_order_never_clicks_cancel_payment():
+    driver = FakeShippingDriver.on_order_detail("已支付")
+    page = ShippingPage(driver)
+
+    assert page.current_payment_state() is OrderPaymentState.PAID
+    assert page.cancel_pending_payment() is False
+    assert "取消支付" not in driver.clicks
+
+
+def test_pending_order_can_cancel_payment_and_verify_result():
+    driver = FakeShippingDriver.on_order_detail("待支付")
+    page = ShippingPage(driver)
+
+    assert page.cancel_pending_payment() is True
+    assert driver.clicks[-2:] == ["取消支付", "确定"]
+    assert page.current_payment_state() is not OrderPaymentState.PENDING
+
+
+def test_cod_does_not_type_password_or_cancel_payment():
+    driver = FakeShippingDriver.on_payment_page()
+    page = ShippingPage(driver)
+
+    assert page.confirm_cash_on_delivery() is True
+    assert driver.sent_values == []
+    assert "取消支付" not in driver.clicks
+
+
+@pytest.mark.parametrize("status", ("已支付 待付款", "货到付款 待支付"))
+def test_ambiguous_order_status_never_clicks_cancel_payment(status):
+    driver = FakeShippingDriver.on_order_detail(status)
+    page = ShippingPage(driver)
+
+    assert page.current_payment_state() is OrderPaymentState.UNKNOWN
+    assert page.cancel_pending_payment() is False
+    assert "取消支付" not in driver.clicks
+
+
+def test_balance_payment_failure_redacts_password_from_sensitive_diagnostic(monkeypatch):
+    driver = FakeShippingDriver.on_payment_page()
+    page = ShippingPage(driver)
+    captures = []
+    original_click = page._click_text
+
+    def click_without_password_confirmation(labels):
+        if labels == ("确定", "确认"):
+            return False
+        return original_click(labels)
+
+    monkeypatch.setattr(page, "_click_text", click_without_password_confirmation)
+    monkeypatch.setattr(
+        page,
+        "capture_shipping_failure",
+        lambda stage, sensitive=False, redact_values=(): captures.append(
+            (stage, sensitive, redact_values)
+        ),
+    )
+
+    with pytest.raises(AssertionError, match="支付页面未找到所需操作"):
+        page.pay_balance("not-a-password")
+
+    assert captures == [
+        ("balance_password_confirm_missing", True, ("not-a-password",))
+    ]
+
+
+def test_run_order_flow_cancels_only_a_confirmed_pending_order(monkeypatch):
+    driver = FakeShippingDriver.on_order_detail("待支付")
+    page = ShippingPage(driver)
+    events = []
+    address = complete_address()
+
+    monkeypatch.setattr(page, "enter_from_app_home", lambda: events.append("home") or True)
+    monkeypatch.setattr(page, "switch_to_delivery_orders", lambda: events.append("orders") or True)
+    monkeypatch.setattr(
+        page, "open_first_deliverable_package", lambda: events.append("package") or True
+    )
+    monkeypatch.setattr(
+        page, "ensure_shipping_address", lambda *_: events.append("address") or True
+    )
+    monkeypatch.setattr(
+        page,
+        "select_earliest_future_delivery",
+        lambda: events.append("delivery") or date(2026, 8, 11),
+    )
+    monkeypatch.setattr(page, "verify_checkout_ready", lambda: events.append("ready") or True)
+    monkeypatch.setattr(page, "submit_order_once", lambda: events.append("submit") or "ORDER-1")
+    monkeypatch.setattr(
+        page, "switch_to_shipping_home", lambda: events.append("return-home") or True
+    )
+
+    assert page.run_order_flow(
+        payment_method=PaymentMethod.BALANCE,
+        cancel_unpaid=True,
+        pay_password="",
+        address_policy=AddressPolicy.AUTO,
+        address_data=address,
+    ) is True
+    assert events == [
+        "home",
+        "orders",
+        "package",
+        "address",
+        "delivery",
+        "ready",
+        "submit",
+        "return-home",
+        "orders",
+    ]
+    assert driver.clicks[-2:] == ["取消支付", "确定"]
 
 
 def test_navigation_failures_capture_non_sensitive_diagnostics(monkeypatch):
