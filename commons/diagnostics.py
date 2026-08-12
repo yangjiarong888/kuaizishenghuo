@@ -21,6 +21,14 @@ _PHONE_LIKE = re.compile(r"(?<!\d)(?:\d[ -]?){6,14}\d(?!\d)")
 _SHORT_CODE_ATTRIBUTE = re.compile(
     r"((?:text|content-desc)\s*=\s*[\"'])\d{4,8}([\"'])"
 )
+_REDACTION_TOKEN = "[REDACTED]"
+_XML_CHARACTER_PATTERNS = {
+    "&": r"(?:&(?:amp|#0*38|#x0*26);|&)",
+    "<": r"(?:&(?:lt|#0*60|#x0*3c);|<)",
+    ">": r"(?:&(?:gt|#0*62|#x0*3e);|>)",
+    '"': r'(?:&(?:quot|#0*34|#x0*22);|")',
+    "'": r"(?:&(?:apos|#0*39|#x0*27);|')",
+}
 
 
 @dataclass(frozen=True)
@@ -43,14 +51,32 @@ def _safe_action(action: str) -> str:
     return value[:48] or "failure"
 
 
+def redact_explicit_values(
+    text: str,
+    redact_values: Iterable[str] = (),
+    *,
+    replacement: str = _REDACTION_TOKEN,
+) -> str:
+    """Replace raw or XML-entity encoded sensitive values deterministically."""
+    sanitized = text or ""
+    values = {
+        str(value).strip() for value in redact_values if str(value).strip()
+    }
+    for value in sorted(values, key=len, reverse=True):
+        pattern = "".join(
+            _XML_CHARACTER_PATTERNS.get(character, re.escape(character))
+            for character in value
+        )
+        sanitized = re.sub(pattern, lambda _match: replacement, sanitized, flags=re.IGNORECASE)
+    return sanitized
+
+
 def sanitize_xml(text: str, redact_values: Iterable[str] = ()) -> str:
     """Redact secret-like values and personal numeric identifiers."""
-    sanitized = _KEYED_ATTRIBUTE.sub(r"\1<redacted>\3", text or "")
-    sanitized = _PHONE_LIKE.sub("<redacted>", sanitized)
-    sanitized = _SHORT_CODE_ATTRIBUTE.sub(r"\1<redacted>\2", sanitized)
-    for value in sorted({str(value).strip() for value in redact_values if str(value).strip()}, key=len, reverse=True):
-        sanitized = sanitized.replace(value, "<redacted>")
-    return sanitized
+    sanitized = _KEYED_ATTRIBUTE.sub(rf"\1{_REDACTION_TOKEN}\3", text or "")
+    sanitized = _PHONE_LIKE.sub(_REDACTION_TOKEN, sanitized)
+    sanitized = _SHORT_CODE_ATTRIBUTE.sub(rf"\1{_REDACTION_TOKEN}\2", sanitized)
+    return redact_explicit_values(sanitized, redact_values)
 
 
 def capture_failure(

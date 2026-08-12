@@ -84,3 +84,17 @@ def test_non_pending_payment_states_cannot_cancel(text, expected):
 
     assert state is expected
     assert can_cancel_payment(state) is False
+
+
+@pytest.mark.parametrize(
+    ("text", "expected_name"),
+    (
+        ("支付已取消", "CANCELLED"),
+        ("订单已关闭", "CLOSED"),
+        ("当前订单不可支付", "NONPAYABLE"),
+    ),
+)
+def test_explicit_cancel_terminal_states_are_classified(text, expected_name):
+    expected = getattr(OrderPaymentState, expected_name, None)
+    assert classify_payment_state(text) is expected
+    assert can_cancel_payment(expected) is False

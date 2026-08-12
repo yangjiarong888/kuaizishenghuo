@@ -4,6 +4,23 @@ from enum import Enum
 import re
 
 
+def xpath_literal(value: str) -> str:
+    """Return a legal XPath 1.0 string literal for arbitrary visible text."""
+    text = str(value)
+    if '"' not in text:
+        return f'"{text}"'
+    if "'" not in text:
+        return f"'{text}'"
+    parts = text.split('"')
+    arguments = []
+    for index, part in enumerate(parts):
+        if part:
+            arguments.append(f'"{part}"')
+        if index < len(parts) - 1:
+            arguments.append("'\"'")
+    return "concat(" + ", ".join(arguments) + ")"
+
+
 class AddressPolicy(str, Enum):
     AUTO = "auto"
     EXISTING = "existing"
@@ -19,6 +36,9 @@ class OrderPaymentState(str, Enum):
     PENDING = "pending"
     PAID = "paid"
     COD = "cod"
+    CANCELLED = "cancelled"
+    CLOSED = "closed"
+    NONPAYABLE = "nonpayable"
     UNKNOWN = "unknown"
 
 
@@ -82,6 +102,12 @@ def earliest_future_label(labels: list[str], today: date) -> tuple[str, date]:
 
 
 def classify_payment_state(text: str) -> OrderPaymentState:
+    if any(marker in text for marker in ("支付已取消", "已取消", "取消成功")):
+        return OrderPaymentState.CANCELLED
+    if any(marker in text for marker in ("订单已关闭", "已关闭", "订单关闭")):
+        return OrderPaymentState.CLOSED
+    if any(marker in text for marker in ("不可支付", "已失效", "支付失效")):
+        return OrderPaymentState.NONPAYABLE
     if any(marker in text for marker in ("待支付", "待付款")):
         return OrderPaymentState.PENDING
     if "货到付款" in text:

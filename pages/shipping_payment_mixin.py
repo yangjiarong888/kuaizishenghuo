@@ -15,6 +15,7 @@ from .shipping_types import (
     can_cancel_payment,
     classify_payment_state,
     parse_delivery_date,
+    xpath_literal,
 )
 
 
@@ -22,13 +23,29 @@ class ShippingPaymentMixin:
     """Keep real submission and payment transitions single-shot and observable."""
 
     _SUBMIT_ORDER_LABELS = ("提交订单",)
-    _PAYMENT_TRANSITION_MARKERS = (
-        "支付方式",
-        "支付密码",
-        "订单详情",
-        "待支付",
-        "已支付",
-        "货到付款",
+    _PAYMENT_PAGE_ROOT_SELECTOR = (
+        '//*[contains(@resource-id,"shipping_payment_page") '
+        'or @content-desc="配送支付页"]'
+    )
+    _PAYMENT_PASSWORD_ROOT_SELECTOR = (
+        '//*[contains(@resource-id,"shipping_balance_password") '
+        'or @content-desc="余额支付密码弹窗"]'
+    )
+    _ORDER_DETAIL_ROOT_SELECTOR = (
+        '//*[contains(@resource-id,"shipping_order_detail") '
+        'or @content-desc="配送订单详情"]'
+    )
+    _CANCEL_DIALOG_ROOT_SELECTOR = (
+        '//*[contains(@resource-id,"shipping_cancel_dialog") '
+        'or @content-desc="取消支付确认弹窗"]'
+    )
+    _CONTEXT_ORDER_NUMBER_SELECTOR = (
+        './/*[contains(@resource-id,"shipping_order_number") '
+        'or @content-desc="配送订单号"]'
+    )
+    _ORDER_STATUS_SELECTOR = (
+        './/*[contains(@resource-id,"shipping_order_status") '
+        'or @content-desc="配送订单状态"]'
     )
     _PAYMENT_PASSWORD_SELECTOR = (
         '//android.widget.EditText['
@@ -71,16 +88,36 @@ class ShippingPaymentMixin:
         if not self._wait_for_payment_or_order_detail():
             self._payment_failure("submit_transition_timeout")
             raise AssertionError("提交订单后未进入支付页或订单详情")
-        self._shipping_order_number = self._read_order_number()
-        return self._shipping_order_number
+        order_number = self._read_transition_order_number()
+        if not order_number:
+            self._payment_failure("submitted_order_identity_unverified")
+            raise AssertionError("提交订单后未从专用节点确认新订单号/订单身份")
+        self._shipping_order_number = order_number
+        logger.info(
+            f"shipping_order_identity order={self._masked_order_number(order_number)} "
+            "result=verified"
+        )
+        return order_number
 
     def pay_balance(self, pay_password: str) -> bool:
         if not pay_password:
             raise ValueError("余额支付需要 SHIPPING_PAY_PASSWORD")
+        payment_root = self._require_bound_payment_page()
         logger.info("payment_method=balance password_configured=true")
-        self._click_payment_text(("余额支付", "余额"), "balance_payment_missing")
-        self._click_payment_text(("确认支付", "立即支付"), "balance_payment_confirm_missing")
-        field = self._payment_password_field()
+        self._click_within(
+            payment_root, ("余额支付", "余额"), "balance_payment_missing"
+        )
+        payment_root = self._require_bound_payment_page()
+        self._click_within(
+            payment_root,
+            ("确认支付", "立即支付"),
+            "balance_payment_confirm_missing",
+        )
+        password_root = self._password_root()
+        if password_root is None:
+            self._payment_failure("balance_password_dialog_missing")
+            raise AssertionError("余额支付确认后未进入支付密码弹窗")
+        field = self._payment_password_field(password_root)
         if field is None:
             self._payment_failure("balance_password_field_missing")
             raise AssertionError("支付密码弹窗未找到输入框")
@@ -91,7 +128,8 @@ class ShippingPaymentMixin:
                 "balance_password_entry_failed", redact_values=(pay_password,)
             )
             raise AssertionError("支付密码输入失败") from exc
-        self._click_payment_text(
+        self._click_within(
+            password_root,
             ("确定", "确认"),
             "balance_password_confirm_missing",
             redact_values=(pay_password,),
@@ -101,24 +139,71 @@ class ShippingPaymentMixin:
         )
 
     def confirm_cash_on_delivery(self) -> bool:
-        self._click_payment_text(("货到付款",), "cod_payment_missing")
-        self._click_payment_text(
-            ("确认支付", "确认选择", "确定"), "cod_payment_confirm_missing"
+        payment_root = self._require_bound_payment_page()
+        logger.info("payment_method=cod selection=started")
+        self._click_within(payment_root, ("货到付款",), "cod_payment_missing")
+        payment_root = self._require_bound_payment_page()
+        self._click_within(
+            payment_root,
+            ("确认支付", "确认选择", "确定"),
+            "cod_payment_confirm_missing",
         )
         return self.assert_payment_result(PaymentMethod.COD)
 
     def current_payment_state(self) -> OrderPaymentState:
-        return self._unambiguous_payment_state(self.page_blob())
+        if self._password_root() is not None or self._cancel_dialog_root() is not None:
+            return OrderPaymentState.UNKNOWN
+        detail = self._verified_target_order_detail_root()
+        if detail is None:
+            return OrderPaymentState.UNKNOWN
+        statuses = self._displayed_children(detail, self._ORDER_STATUS_SELECTOR)
+        if len(statuses) != 1:
+            return OrderPaymentState.UNKNOWN
+        return self._unambiguous_payment_state(self._element_blob(statuses[0]))
 
     def cancel_pending_payment(self) -> bool:
         state = self.current_payment_state()
         if not can_cancel_payment(state):
+            logger.info(
+                "shipping_cancel "
+                f"order={self._masked_order_number(getattr(self, '_shipping_order_number', None))} "
+                f"state={state.value} cancel_result=blocked"
+            )
             return False
-        self._click_payment_text(("取消支付",), "cancel_payment_missing")
-        self._click_payment_text(("确定", "确认取消"), "cancel_payment_confirm_missing")
-        if self.current_payment_state() is OrderPaymentState.PENDING:
-            self._payment_failure("cancel_payment_still_pending")
-            raise AssertionError("取消支付后订单仍为待支付")
+        detail = self._verified_target_order_detail_root()
+        if detail is None:
+            return False
+        cancel_actions = self._displayed_children(
+            detail, self._relative_text_selector(("取消支付",))
+        )
+        enabled = [action for action in cancel_actions if self._is_enabled(action)]
+        if len(enabled) != 1:
+            self._payment_failure("cancel_payment_action_unverified")
+            raise AssertionError("待支付订单详情未找到唯一可用的取消支付操作")
+        try:
+            enabled[0].click()
+        except Exception as exc:
+            self._payment_failure("cancel_payment_click_failed")
+            raise AssertionError("取消支付点击失败") from exc
+        dialog = self._cancel_dialog_root()
+        if dialog is None:
+            self._payment_failure("cancel_payment_dialog_unverified")
+            raise AssertionError("取消支付确认弹窗未验证")
+        self._click_within(dialog, ("确定", "确认取消"), "cancel_payment_confirm_missing")
+        terminal_states = {
+            OrderPaymentState.CANCELLED,
+            OrderPaymentState.CLOSED,
+            OrderPaymentState.NONPAYABLE,
+        }
+        if not self._wait_until(lambda: self.current_payment_state() in terminal_states):
+            self._payment_failure("cancel_payment_terminal_unconfirmed")
+            raise AssertionError("取消支付终态未确认")
+        final_state = self.current_payment_state()
+        logger.info(
+            "shipping_cancel "
+            f"order={self._masked_order_number(getattr(self, '_shipping_order_number', None))} "
+            f"state={final_state.value} cancel_result=success"
+        )
         return True
 
     def assert_payment_result(
@@ -130,6 +215,19 @@ class ShippingPaymentMixin:
             else OrderPaymentState.PAID
         )
         if self._wait_until(lambda: self.current_payment_state() is expected):
+            detail = self._verified_target_order_detail_root()
+            if detail is None:
+                self._payment_failure(
+                    f"{method.value}_order_detail_unverified",
+                    redact_values=redact_values,
+                )
+                raise AssertionError("支付结果未在新订单详情中确认")
+            self._assert_cancel_unavailable(detail, redact_values=redact_values)
+            logger.info(
+                "shipping_payment "
+                f"order={self._masked_order_number(getattr(self, '_shipping_order_number', None))} "
+                f"payment_method={method.value} state={expected.value} result=success"
+            )
             return True
         self._payment_failure(
             f"{method.value}_payment_result_unconfirmed", redact_values=redact_values
@@ -138,15 +236,46 @@ class ShippingPaymentMixin:
 
     def leave_balance_payment_unconfirmed(self) -> bool:
         """Select balance without entering a password, then require a pending order."""
-        if self.current_payment_state() is OrderPaymentState.PENDING:
-            return True
-        self._click_payment_text(("余额支付", "余额"), "balance_payment_missing")
-        self._click_payment_text(("确认支付", "立即支付"), "balance_payment_confirm_missing")
-        if not self._wait_until(
-            lambda: self.current_payment_state() is OrderPaymentState.PENDING
+        if (
+            self._password_root() is None
+            and self.current_payment_state() is OrderPaymentState.PENDING
         ):
-            self._payment_failure("balance_pending_state_unconfirmed")
-            raise AssertionError("未输入余额支付密码时订单未进入待支付状态")
+            return True
+        payment_root = self._require_bound_payment_page()
+        logger.info("payment_method=balance action=leave_unconfirmed")
+        self._click_within(
+            payment_root, ("余额支付", "余额"), "balance_payment_missing"
+        )
+        payment_root = self._require_bound_payment_page()
+        self._click_within(
+            payment_root,
+            ("确认支付", "立即支付"),
+            "balance_payment_confirm_missing",
+        )
+        password_root = self._password_root()
+        if password_root is not None:
+            dismissal = self._first_displayed_child(
+                password_root, self._relative_text_selector(("取消", "关闭", "返回"))
+            )
+            if dismissal is not None:
+                try:
+                    dismissal.click()
+                except Exception as exc:
+                    logger.debug(
+                        "Balance password dismissal click failed error_type=%s",
+                        type(exc).__name__,
+                    )
+            if not self._is_exact_pending_order_detail():
+                try:
+                    self.driver.back()
+                except Exception as exc:
+                    logger.debug(
+                        "Balance password back failed error_type=%s",
+                        type(exc).__name__,
+                    )
+        if not self._wait_until(self._is_exact_pending_order_detail):
+            self._payment_failure("balance_pending_order_detail_unconfirmed")
+            raise AssertionError("未能退出支付密码流程并到达新订单待支付订单详情")
         return True
 
     def prevalidate_order_inputs(
@@ -265,9 +394,10 @@ class ShippingPaymentMixin:
 
     def _find_submit_order_button(self):
         for label in self._SUBMIT_ORDER_LABELS:
+            literal = xpath_literal(label)
             button = self._first_displayed(
                 AppiumBy.XPATH,
-                f'//*[@text="{label}" or @content-desc="{label}"]',
+                f'//*[@text={literal} or @content-desc={literal}]',
             )
             if button is not None:
                 return button
@@ -275,22 +405,106 @@ class ShippingPaymentMixin:
 
     def _wait_for_payment_or_order_detail(self) -> bool:
         return self._wait_until(
-            lambda: any(marker in self.page_blob() for marker in self._PAYMENT_TRANSITION_MARKERS)
+            lambda: self._payment_root() is not None
+            or bool(self._order_detail_roots())
         )
 
-    def _read_order_number(self) -> str | None:
-        match = self._ORDER_NUMBER.search(self.page_blob())
-        return match.group(1) if match else None
+    def _read_transition_order_number(self) -> str | None:
+        roots = []
+        payment = self._payment_root()
+        if payment is not None:
+            roots.append(payment)
+        roots.extend(self._order_detail_roots())
+        if len(roots) != 1:
+            return None
+        return self._read_order_number_from_root(roots[0])
 
-    def _payment_password_field(self):
-        return self._first_displayed(AppiumBy.XPATH, self._PAYMENT_PASSWORD_SELECTOR)
+    def _read_order_number_from_root(self, root) -> str | None:
+        nodes = self._displayed_children(root, self._CONTEXT_ORDER_NUMBER_SELECTOR)
+        if len(nodes) != 1:
+            return None
+        match = self._ORDER_NUMBER.search(self._element_blob(nodes[0]))
+        if match is None:
+            return None
+        value = match.group(1).strip()
+        if value.lower() in {"none", "null", "unknown", "unavailable"}:
+            return None
+        return value
+
+    @staticmethod
+    def _masked_order_number(order_number: str | None) -> str:
+        value = str(order_number or "").strip()
+        return f"***{value[-4:]}" if value else "unverified"
+
+    def _payment_root(self):
+        return self._single_displayed_root(self._PAYMENT_PAGE_ROOT_SELECTOR)
+
+    def _password_root(self):
+        return self._single_displayed_root(self._PAYMENT_PASSWORD_ROOT_SELECTOR)
+
+    def _cancel_dialog_root(self):
+        return self._single_displayed_root(self._CANCEL_DIALOG_ROOT_SELECTOR)
+
+    def _single_displayed_root(self, selector: str):
+        try:
+            candidates = self.driver.find_elements(AppiumBy.XPATH, selector)
+        except Exception as exc:
+            logger.debug(
+                "Payment context lookup failed error_type=%s", type(exc).__name__
+            )
+            return None
+        displayed = [
+            candidate for candidate in candidates if self._is_displayed(candidate)
+        ]
+        return displayed[0] if len(displayed) == 1 else None
+
+    def _order_detail_roots(self) -> list:
+        try:
+            candidates = self.driver.find_elements(
+                AppiumBy.XPATH, self._ORDER_DETAIL_ROOT_SELECTOR
+            )
+        except Exception as exc:
+            logger.debug(
+                "Order detail lookup failed error_type=%s", type(exc).__name__
+            )
+            return []
+        return [candidate for candidate in candidates if self._is_displayed(candidate)]
+
+    def _verified_target_order_detail_root(self):
+        target = getattr(self, "_shipping_order_number", None)
+        if not target:
+            return None
+        roots = self._order_detail_roots()
+        if len(roots) != 1:
+            return None
+        return (
+            roots[0]
+            if self._read_order_number_from_root(roots[0]) == target
+            else None
+        )
+
+    def _require_bound_payment_page(self):
+        target = getattr(self, "_shipping_order_number", None)
+        root = self._payment_root()
+        if (
+            not target
+            or root is None
+            or self._read_order_number_from_root(root) != target
+        ):
+            self._payment_failure("payment_order_identity_unverified")
+            raise AssertionError("支付页未绑定到新提交订单身份")
+        return root
+
+    def _payment_password_field(self, password_root):
+        return self._first_displayed_child(password_root, self._PAYMENT_PASSWORD_SELECTOR)
 
     def _first_package_action(self, container):
         for label in self._PACKAGE_ACTION_LABELS:
+            literal = xpath_literal(label)
             try:
                 actions = container.find_elements(
                     AppiumBy.XPATH,
-                    f'.//*[@text="{label}" or @content-desc="{label}"]',
+                    f'.//*[@text={literal} or @content-desc={literal}]',
                 )
             except Exception as exc:
                 logger.debug("Shipping package action lookup failed error_type=%s", type(exc).__name__)
@@ -309,16 +523,77 @@ class ShippingPaymentMixin:
     def _is_package_checkout(self) -> bool:
         return "提交订单" in self.page_blob() and not self._is_delivery_orders_page()
 
-    def _click_payment_text(
+    def _click_within(
         self,
+        root,
         labels: tuple[str, ...],
         failure_stage: str,
         *,
         redact_values: tuple[str, ...] = (),
     ) -> None:
-        if not self._click_text(labels):
+        action = self._first_displayed_child(root, self._relative_text_selector(labels))
+        if action is None or not self._is_enabled(action):
             self._payment_failure(failure_stage, redact_values=redact_values)
-            raise AssertionError("支付页面未找到所需操作")
+            raise AssertionError("支付上下文内未找到唯一可用操作")
+        try:
+            action.click()
+        except Exception as exc:
+            self._payment_failure(failure_stage, redact_values=redact_values)
+            raise AssertionError("支付上下文操作点击失败") from exc
+
+    @staticmethod
+    def _relative_text_selector(labels: tuple[str, ...]) -> str:
+        clauses = []
+        for label in labels:
+            literal = xpath_literal(label)
+            clauses.extend((f"@text={literal}", f"@content-desc={literal}"))
+        return ".//*[" + " or ".join(clauses) + "]"
+
+    def _displayed_children(self, root, selector: str) -> list:
+        try:
+            candidates = root.find_elements(AppiumBy.XPATH, selector)
+        except Exception as exc:
+            logger.debug(
+                "Scoped payment lookup failed error_type=%s", type(exc).__name__
+            )
+            return []
+        return [candidate for candidate in candidates if self._is_displayed(candidate)]
+
+    def _first_displayed_child(self, root, selector: str):
+        candidates = self._displayed_children(root, selector)
+        return candidates[0] if len(candidates) == 1 else None
+
+    @staticmethod
+    def _is_displayed(element) -> bool:
+        try:
+            return bool(element.is_displayed())
+        except Exception:
+            return False
+
+    @staticmethod
+    def _is_enabled(element) -> bool:
+        try:
+            return bool(element.is_enabled())
+        except Exception:
+            return False
+
+    def _is_exact_pending_order_detail(self) -> bool:
+        return (
+            self._password_root() is None
+            and self.current_payment_state() is OrderPaymentState.PENDING
+        )
+
+    def _assert_cancel_unavailable(
+        self, detail, *, redact_values: tuple[str, ...] = ()
+    ) -> None:
+        cancel_actions = self._displayed_children(
+            detail, self._relative_text_selector(("取消支付",))
+        )
+        if any(self._is_enabled(action) for action in cancel_actions):
+            self._payment_failure(
+                "paid_order_cancel_still_available", redact_values=redact_values
+            )
+            raise AssertionError("已支付/货到付款订单详情仍存在可用取消支付操作")
 
     @staticmethod
     def _unambiguous_payment_state(text: str) -> OrderPaymentState:
@@ -326,6 +601,9 @@ class ShippingPaymentMixin:
             OrderPaymentState.PENDING: ("待支付", "待付款"),
             OrderPaymentState.PAID: ("支付成功", "已支付", "在线支付"),
             OrderPaymentState.COD: ("货到付款",),
+            OrderPaymentState.CANCELLED: ("支付已取消", "已取消", "取消成功"),
+            OrderPaymentState.CLOSED: ("订单已关闭", "已关闭", "订单关闭"),
+            OrderPaymentState.NONPAYABLE: ("不可支付", "已失效", "支付失效"),
         }
         observed = {
             state

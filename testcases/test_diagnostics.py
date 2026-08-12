@@ -1,3 +1,5 @@
+from xml.etree import ElementTree
+
 import pytest
 
 
@@ -54,7 +56,7 @@ def test_capture_failure_writes_sanitized_artifacts(tmp_path):
     assert "secret" not in xml
     assert "09123456789" not in xml
     assert "123456" not in xml
-    assert "<redacted>" in xml
+    assert "[REDACTED]" in xml
 
 
 def test_capture_failure_tolerates_unavailable_driver_evidence(tmp_path):
@@ -122,4 +124,45 @@ def test_capture_failure_redacts_explicit_sensitive_values_from_xml(tmp_path):
         "1000",
     ):
         assert value not in xml
-    assert "<redacted>" in xml
+    assert "[REDACTED]" in xml
+
+
+def test_capture_failure_redacts_mixed_xml_entity_encodings_without_corrupting_xml(
+    tmp_path,
+):
+    from commons.diagnostics import capture_failure
+
+    driver = FakeDriver()
+    name = 'A&B<Name>"Quoted"\'Single\''
+    detail = 'Unit & <One> "Two"\'Three\''
+    match = 'Find & <Match> "Four"\'Five\''
+    password = 'pw&<>"\''
+    driver.page_source = (
+        '<hierarchy><node '
+        'text="A&amp;B&lt;Name&gt;&quot;Quoted&quot;&apos;Single&apos;" '
+        'content-desc="Unit &#38; &#60;One&#62; &#34;Two&#34;&#39;Three&#39;" '
+        'hint="Find &#x26; &#x3c;Match&#x3e; &#x22;Four&#x22;&#x27;Five&#x27;" '
+        'password="pw&amp;&lt;&gt;&quot;&apos;" /></hierarchy>'
+    )
+
+    artifacts = capture_failure(
+        driver,
+        "encoded_pii",
+        artifacts_dir=tmp_path,
+        include_screenshot=False,
+        redact_values=(name, detail, match, password),
+    )
+
+    xml = artifacts.page_source.read_text(encoding="utf-8")
+    ElementTree.fromstring(xml)
+    for fragment in (
+        "A&amp;B",
+        "Unit &#38;",
+        "Find &#x26;",
+        "pw&amp;",
+        "Quoted",
+        "Three",
+        "Five",
+    ):
+        assert fragment not in xml
+    assert xml.count("[REDACTED]") >= 4
