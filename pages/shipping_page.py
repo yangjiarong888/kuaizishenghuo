@@ -279,7 +279,14 @@ class ShippingPage(ShippingPaymentMixin, ShippingDeliveryMixin, ShippingAddressM
             return ()
 
     def _is_sensitive_page_context(self) -> bool:
-        blob = self.page_blob()
+        try:
+            blob = str(self.driver.page_source or "")
+        except Exception as exc:
+            logger.debug(
+                "Shipping sensitivity source probe failed error_type=%s",
+                type(exc).__name__,
+            )
+            return True
         if any(
             marker in blob
             for marker in (
@@ -304,10 +311,27 @@ class ShippingPage(ShippingPaymentMixin, ShippingDeliveryMixin, ShippingAddressM
             self._ORDER_DETAIL_ROOT_SELECTOR,
             self._CANCEL_DIALOG_ROOT_SELECTOR,
         )
-        return any(
-            self._first_displayed(AppiumBy.XPATH, selector) is not None
-            for selector in sensitive_roots
-        )
+        for selector in sensitive_roots:
+            try:
+                candidates = self.driver.find_elements(AppiumBy.XPATH, selector)
+            except Exception as exc:
+                logger.debug(
+                    "Shipping sensitivity root probe failed error_type=%s",
+                    type(exc).__name__,
+                )
+                return True
+            for candidate in candidates:
+                try:
+                    displayed = bool(candidate.is_displayed())
+                except Exception as exc:
+                    logger.debug(
+                        "Shipping sensitivity visibility probe failed error_type=%s",
+                        type(exc).__name__,
+                    )
+                    return True
+                if displayed:
+                    return True
+        return False
 
     def capture_shipping_failure(
         self,

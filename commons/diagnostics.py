@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable
+from xml.etree import ElementTree
 
 from commons.logger import setup_logger
 
@@ -60,23 +61,60 @@ def redact_explicit_values(
     """Replace raw or XML-entity encoded sensitive values deterministically."""
     sanitized = text or ""
     values = {
-        str(value).strip() for value in redact_values if str(value).strip()
+        str(value).strip()
+        for value in redact_values
+        if str(value).strip()
     }
     for value in sorted(values, key=len, reverse=True):
         pattern = "".join(
             _XML_CHARACTER_PATTERNS.get(character, re.escape(character))
             for character in value
         )
-        sanitized = re.sub(pattern, lambda _match: replacement, sanitized, flags=re.IGNORECASE)
+        sanitized = replacement.join(
+            re.sub(pattern, lambda _match: replacement, chunk, flags=re.IGNORECASE)
+            for chunk in sanitized.split(replacement)
+        )
     return sanitized
 
 
 def sanitize_xml(text: str, redact_values: Iterable[str] = ()) -> str:
-    """Redact secret-like values and personal numeric identifiers."""
-    sanitized = _KEYED_ATTRIBUTE.sub(rf"\1{_REDACTION_TOKEN}\3", text or "")
-    sanitized = _PHONE_LIKE.sub(_REDACTION_TOKEN, sanitized)
-    sanitized = _SHORT_CODE_ATTRIBUTE.sub(rf"\1{_REDACTION_TOKEN}\2", sanitized)
-    return redact_explicit_values(sanitized, redact_values)
+    """Redact only XML attribute/text values and keep a parseable artifact."""
+    source = text or ""
+    try:
+        root = ElementTree.fromstring(source)
+    except (ElementTree.ParseError, ValueError, TypeError):
+        return '<hierarchy redaction="fallback" reason="malformed_source" />'
+
+    def sanitized_value(value: str) -> str:
+        sanitized = _KEYED_ATTRIBUTE.sub(rf"\1{_REDACTION_TOKEN}\3", value or "")
+        sanitized = _PHONE_LIKE.sub(_REDACTION_TOKEN, sanitized)
+        sanitized = _SHORT_CODE_ATTRIBUTE.sub(
+            rf"\1{_REDACTION_TOKEN}\2", sanitized
+        )
+        return redact_explicit_values(sanitized, redact_values)
+
+    for element in root.iter():
+        for name, value in tuple(element.attrib.items()):
+            if name.lower() in {
+                "password",
+                "passwd",
+                "pwd",
+                "verification_code",
+                "pay_password",
+                "token",
+            }:
+                element.set(name, _REDACTION_TOKEN)
+            elif name in {"text", "content-desc"} and re.fullmatch(
+                r"\d{4,8}", value or ""
+            ):
+                element.set(name, _REDACTION_TOKEN)
+            else:
+                element.set(name, sanitized_value(value))
+        if element.text:
+            element.text = sanitized_value(element.text)
+        if element.tail:
+            element.tail = sanitized_value(element.tail)
+    return ElementTree.tostring(root, encoding="unicode", short_empty_elements=True)
 
 
 def capture_failure(

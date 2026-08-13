@@ -166,3 +166,90 @@ def test_capture_failure_redacts_mixed_xml_entity_encodings_without_corrupting_x
     ):
         assert fragment not in xml
     assert xml.count("[REDACTED]") >= 4
+
+
+def test_short_explicit_values_redact_only_xml_attribute_and_text_content(tmp_path):
+    from commons.diagnostics import capture_failure
+
+    driver = FakeDriver()
+    driver.page_source = (
+        '<hierarchy A="public"><node node="node" text="A">'
+        'A node<child content-desc="node">A</child>'
+        '</node></hierarchy>'
+    )
+
+    artifacts = capture_failure(
+        driver,
+        "short_pii",
+        artifacts_dir=tmp_path,
+        include_screenshot=False,
+        redact_values=("A", "node"),
+    )
+
+    xml = artifacts.page_source.read_text(encoding="utf-8")
+    root = ElementTree.fromstring(xml)
+    node = root.find("node")
+    child = node.find("child")
+    assert root.tag == "hierarchy"
+    assert root.attrib["A"] == "public"
+    assert node.tag == "node"
+    assert set(node.attrib) == {"node", "text"}
+    assert node.attrib["node"] == "[REDACTED]"
+    assert node.attrib["text"] == "[REDACTED]"
+    assert node.text == "[REDACTED] [REDACTED]"
+    assert child.attrib["content-desc"] == "[REDACTED]"
+    assert child.text == "[REDACTED]"
+
+
+def test_explicit_value_with_encoded_characters_is_redacted_from_attributes_and_text(
+    tmp_path,
+):
+    from commons.diagnostics import capture_failure
+
+    driver = FakeDriver()
+    secret = 'A&B<Node>"Q"\'S\''
+    driver.page_source = (
+        '<hierarchy><node '
+        'text="A&amp;B&lt;Node&gt;&quot;Q&quot;&apos;S&apos;">'
+        'A&#38;B&#60;Node&#62;&#34;Q&#34;&#39;S&#39;'
+        '</node></hierarchy>'
+    )
+
+    artifacts = capture_failure(
+        driver,
+        "encoded_attribute_and_text",
+        artifacts_dir=tmp_path,
+        include_screenshot=False,
+        redact_values=(secret,),
+    )
+
+    xml = artifacts.page_source.read_text(encoding="utf-8")
+    root = ElementTree.fromstring(xml)
+    node = root.find("node")
+    assert node.attrib["text"] == "[REDACTED]"
+    assert node.text == "[REDACTED]"
+
+
+def test_malformed_xml_uses_parseable_nonleaking_diagnostic_fallback(tmp_path):
+    from commons.diagnostics import capture_failure
+
+    driver = FakeDriver()
+    driver.page_source = '<hierarchy><node text="PRIVATE-1234">Tester & broken'
+
+    artifacts = capture_failure(
+        driver,
+        "malformed_sensitive_xml",
+        artifacts_dir=tmp_path,
+        include_screenshot=False,
+        redact_values=("PRIVATE-1234", "Tester"),
+    )
+
+    xml = artifacts.page_source.read_text(encoding="utf-8")
+    root = ElementTree.fromstring(xml)
+    assert root.tag == "hierarchy"
+    assert root.attrib == {
+        "redaction": "fallback",
+        "reason": "malformed_source",
+    }
+    assert "PRIVATE-1234" not in xml
+    assert "Tester" not in xml

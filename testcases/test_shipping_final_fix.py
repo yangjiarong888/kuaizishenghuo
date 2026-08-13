@@ -22,6 +22,7 @@ class UiNode:
         on_click=None,
         *,
         enabled=True,
+        enabled_error=False,
         attributes=None,
         kind="",
     ):
@@ -29,6 +30,7 @@ class UiNode:
         self.text = text
         self.on_click = on_click
         self.enabled = enabled
+        self.enabled_error = enabled_error
         self.attributes = attributes or {}
         self.kind = kind
 
@@ -36,6 +38,8 @@ class UiNode:
         return True
 
     def is_enabled(self):
+        if self.enabled_error:
+            raise RuntimeError("enabled state unavailable")
         return self.enabled
 
     def get_attribute(self, name):
@@ -64,6 +68,8 @@ class NavigationDriver:
     def __init__(self, screen="app_home"):
         self.screen = screen
         self.ambiguous_roots = False
+        self.page_source_query_error = False
+        self.sensitive_root_query_error = False
         self.clicks = []
         self.current_activity = "com.bs.feifubao.MainActivity"
         self.current_context = "NATIVE_APP"
@@ -71,6 +77,8 @@ class NavigationDriver:
 
     @property
     def page_source(self):
+        if self.page_source_query_error:
+            raise RuntimeError("page source unavailable")
         if self.screen == "app_home":
             return "筷子生活 首页 国际货运"
         if self.screen in {"shipping_home", "delivery_orders"}:
@@ -87,6 +95,22 @@ class NavigationDriver:
         return label in value
 
     def find_elements(self, by, value):
+        sensitive_root_query = any(
+            marker in value
+            for marker in (
+                "shipping_checkout_root",
+                "shipping_address_book",
+                "shipping_address_form",
+                "shipping_payment_page",
+                "shipping_balance_password",
+                "shipping_order_detail",
+                "shipping_cancel_dialog",
+            )
+        )
+        if self.sensitive_root_query_error and sensitive_root_query:
+            raise RuntimeError("sensitive root hierarchy unavailable")
+        if sensitive_root_query:
+            return []
         if ("app_home_root" in value or "筷子生活首页" in value) and (
             self.screen == "app_home" or self.ambiguous_roots
         ):
@@ -322,13 +346,22 @@ class OrderDriver:
         self.sent_values = []
         self.payment_confirm_responsive = True
         self.password_confirm_responsive = True
+        self.submit_responsive = True
+        self.stale_payment_on_checkout = False
+        self.stale_order_number = "OLD-9999"
         self.dismiss_responsive = True
         self.back_responsive = True
+        self.ambiguous_navigation_after_back = False
         self.cancel_result = "已取消"
         self.cancel_enabled = status == "待支付"
+        self.cancel_action_present = True
+        self.cancel_lookup_error = False
+        self.cancel_enabled_error = False
         self.global_cancel_decoy = False
         self.detail_decoys = True
         self.password_background_pending = False
+        self.extra_password_roots = 0
+        self.password_root_query_error = False
         self.extra_detail_order_numbers = []
         self.extra_payment_order_numbers = []
         self.global_payment_action_queries = 0
@@ -352,10 +385,13 @@ class OrderDriver:
             return "确认取消支付 加载中"
         if self.screen == "order_list":
             return "配送订单 OTHER-9999 待支付 取消支付"
+        if self.screen in {"delivery_orders", "shipping_home"}:
+            return "国际货运 寄件全球 配送订单 全部 待付款"
         return ""
 
     def _show_payment(self):
-        self.screen = "payment"
+        if self.submit_responsive:
+            self.screen = "payment"
 
     def _select_balance(self):
         self.selected_method = "balance"
@@ -391,11 +427,15 @@ class OrderDriver:
 
     def back(self):
         self.clicks.append("driver.back")
-        if self.back_responsive:
+        if not self.back_responsive:
+            return
+        if self.screen == "balance_password":
             self.screen = "order_detail"
             self.detail_order_number = self.order_number
             self.status = "待支付"
             self.cancel_enabled = True
+        elif self.screen == "order_detail":
+            self.screen = "delivery_orders"
 
     def _open_cancel(self):
         self.screen = "cancel_dialog"
@@ -408,11 +448,31 @@ class OrderDriver:
         self.cancel_enabled = False
 
     def find_elements(self, by, value):
+        if (
+            ("shipping_home_content" in value or "国际货运首页内容" in value)
+            and (
+                self.screen == "shipping_home"
+                or (
+                    self.screen == "delivery_orders"
+                    and self.ambiguous_navigation_after_back
+                )
+            )
+        ):
+            return [UiNode(self, "国际货运 寄件全球", kind="shipping_home")]
+        if (
+            ("delivery_order_list" in value or "配送订单列表" in value)
+            and self.screen == "delivery_orders"
+        ):
+            return [UiNode(self, "配送订单 全部 待付款", kind="delivery_orders")]
         if ("shipping_checkout_root" in value or "配送提交订单页" in value) and self.screen == "checkout":
             return [UiNode(self, "提交订单", kind="checkout")]
-        if ("shipping_payment_page" in value or "配送支付页" in value) and self.screen == "payment":
+        if ("shipping_payment_page" in value or "配送支付页" in value) and (
+            self.screen == "payment"
+            or (self.screen == "checkout" and self.stale_payment_on_checkout)
+        ):
+            kind = "payment" if self.screen == "payment" else "stale_payment"
             return [
-                UiNode(self, "支付方式", kind="payment"),
+                UiNode(self, "支付方式", kind=kind),
                 *[
                     UiNode(
                         self,
@@ -424,8 +484,19 @@ class OrderDriver:
                 ],
             ]
         if ("shipping_balance_password" in value or "余额支付密码弹窗" in value) and self.screen == "balance_password":
-            return [UiNode(self, "请输入支付密码", kind="password")]
-        if ("shipping_order_detail" in value or "配送订单详情" in value) and self.screen == "order_detail":
+            if self.password_root_query_error:
+                raise RuntimeError("password root hierarchy unavailable")
+            return [
+                UiNode(self, "请输入支付密码", kind="password"),
+                *[
+                    UiNode(self, "请输入支付密码", kind="password_extra")
+                    for _index in range(self.extra_password_roots)
+                ],
+            ]
+        if ("shipping_order_detail" in value or "配送订单详情" in value) and (
+            self.screen == "order_detail"
+            or (self.screen == "balance_password" and self.password_background_pending)
+        ):
             return [
                 UiNode(self, "订单详情", kind="detail"),
                 *[
@@ -440,6 +511,8 @@ class OrderDriver:
             ]
         if ("shipping_cancel_dialog" in value or "取消支付确认弹窗" in value) and self.screen == "cancel_dialog":
             return [UiNode(self, "确认取消支付", kind="cancel_dialog")]
+        if "shipping_cancel_dialog" in value or "取消支付确认弹窗" in value:
+            return []
         if self.screen == "checkout" and "提交订单" in value:
             return [UiNode(self, "提交订单", self._show_payment)]
         if self.screen == "payment" and "余额支付" in value:
@@ -466,14 +539,32 @@ class OrderDriver:
             return [UiNode(self, "确定", self._confirm_cancel)]
         if self.screen == "order_list" and self.global_cancel_decoy and "取消支付" in value:
             return [UiNode(self, "取消支付", self._open_cancel)]
+        if self.screen == "delivery_orders" and any(
+            label in value for label in ("国际货运", "首页")
+        ):
+            return [
+                UiNode(
+                    self,
+                    "首页",
+                    lambda: setattr(self, "screen", "shipping_home"),
+                )
+            ]
         return []
 
     def find_in_node(self, node, value):
-        if node.kind in {"payment", "payment_extra", "detail", "detail_extra"} and any(
+        if node.kind in {
+            "payment",
+            "stale_payment",
+            "payment_extra",
+            "detail",
+            "detail_extra",
+        } and any(
             marker in value for marker in ("shipping_order_number", "配送订单号")
         ):
             if node.kind == "payment":
                 number = self.order_number
+            elif node.kind == "stale_payment":
+                number = self.stale_order_number
             elif node.kind == "detail":
                 number = self.detail_order_number
             else:
@@ -492,7 +583,19 @@ class OrderDriver:
         ):
             return [UiNode(self, "确认支付", self._confirm_method)]
         if node.kind == "detail" and "取消支付" in value:
-            return [UiNode(self, "取消支付", self._open_cancel, enabled=self.cancel_enabled)]
+            if self.cancel_lookup_error:
+                raise RuntimeError("cancel action hierarchy unavailable")
+            if not self.cancel_action_present:
+                return []
+            return [
+                UiNode(
+                    self,
+                    "取消支付",
+                    self._open_cancel,
+                    enabled=self.cancel_enabled,
+                    enabled_error=self.cancel_enabled_error,
+                )
+            ]
         if node.kind == "password" and "android.widget.EditText" in value:
             return [PasswordField(self, "支付密码")]
         if node.kind == "password" and any(label in value for label in ("取消", "关闭", "返回")):
@@ -516,6 +619,41 @@ def test_submit_requires_a_new_dedicated_order_identity_after_transition():
     with pytest.raises(AssertionError, match="订单号|订单身份"):
         ShippingPage(driver).submit_order_once()
 
+    assert driver.clicks.count("提交订单") == 1
+
+
+def test_submit_rejects_stale_preexisting_payment_identity_when_click_is_noop(
+    monkeypatch,
+):
+    driver = OrderDriver(screen="checkout", order_number="NEW-1234")
+    driver.stale_payment_on_checkout = True
+    driver.stale_order_number = "OLD-9999"
+    driver.submit_responsive = False
+    page = ShippingPage(driver)
+    captures = []
+    monkeypatch.setattr(
+        page,
+        "capture_shipping_failure",
+        lambda stage, sensitive=False, redact_values=(), **_kwargs: captures.append(
+            (stage, sensitive, tuple(redact_values))
+        ),
+    )
+
+    with pytest.raises(AssertionError, match="新订单|订单身份|提交订单"):
+        page.submit_order_once()
+
+    assert driver.clicks.count("提交订单") == 1
+    assert page._shipping_order_submitted is True
+    assert getattr(page, "_shipping_order_number", None) is None
+    assert captures
+
+
+def test_submit_accepts_verified_stale_to_fresh_order_transition():
+    driver = OrderDriver(screen="checkout", order_number="NEW-1234")
+    driver.stale_payment_on_checkout = True
+    driver.stale_order_number = "OLD-9999"
+
+    assert ShippingPage(driver).submit_order_once() == "NEW-1234"
     assert driver.clicks.count("提交订单") == 1
 
 
@@ -631,6 +769,54 @@ def test_unpaid_balance_flow_fails_if_dismiss_and_back_do_not_leave_password_mod
     assert "取消支付" not in driver.clicks
 
 
+def test_unpaid_balance_flow_rejects_two_password_roots_over_pending_background(
+    monkeypatch,
+):
+    driver = OrderDriver(screen="payment")
+    driver.password_background_pending = True
+    driver.extra_password_roots = 1
+    page = bind(ShippingPage(driver))
+    captures = []
+    monkeypatch.setattr(
+        page,
+        "capture_shipping_failure",
+        lambda stage, sensitive=False, redact_values=(), **_kwargs: captures.append(
+            (stage, sensitive, tuple(redact_values))
+        ),
+    )
+
+    with pytest.raises(AssertionError, match="密码弹窗|无法.*验证|不唯一"):
+        page.leave_balance_payment_unconfirmed()
+
+    assert captures and captures[-1][1] is True
+    assert "关闭" not in driver.clicks
+    assert "driver.back" not in driver.clicks
+
+
+def test_unpaid_balance_flow_rejects_password_root_query_error_over_pending_background(
+    monkeypatch,
+):
+    driver = OrderDriver(screen="payment")
+    driver.password_background_pending = True
+    driver.password_root_query_error = True
+    page = bind(ShippingPage(driver))
+    captures = []
+    monkeypatch.setattr(
+        page,
+        "capture_shipping_failure",
+        lambda stage, sensitive=False, redact_values=(), **_kwargs: captures.append(
+            (stage, sensitive, tuple(redact_values))
+        ),
+    )
+
+    with pytest.raises(AssertionError, match="密码弹窗|无法.*验证|查询"):
+        page.leave_balance_payment_unconfirmed()
+
+    assert captures and captures[-1][1] is True
+    assert "关闭" not in driver.clicks
+    assert "driver.back" not in driver.clicks
+
+
 @pytest.mark.parametrize("cancel_result", ("加载中", "dialog_noop"))
 def test_cancel_unknown_loading_or_stale_dialog_fails_closed(cancel_result):
     driver = OrderDriver(screen="order_detail", status="待支付")
@@ -663,6 +849,100 @@ def test_paid_result_rejects_enabled_cancel_on_exact_paid_detail_without_clickin
         page.assert_payment_result(PaymentMethod.BALANCE)
 
     assert "取消支付" not in driver.clicks
+
+
+@pytest.mark.parametrize("probe_error", ("lookup", "enabled"))
+def test_paid_result_fails_sensitively_when_cancel_availability_is_unknown(
+    monkeypatch, probe_error
+):
+    driver = OrderDriver(screen="order_detail", status="已支付")
+    driver.detail_decoys = False
+    driver.cancel_enabled = False
+    if probe_error == "lookup":
+        driver.cancel_lookup_error = True
+    else:
+        driver.cancel_enabled_error = True
+    page = bind(ShippingPage(driver))
+    captures = []
+    monkeypatch.setattr(
+        page,
+        "capture_shipping_failure",
+        lambda stage, sensitive=False, redact_values=(), **_kwargs: captures.append(
+            (stage, sensitive, tuple(redact_values))
+        ),
+    )
+
+    with pytest.raises(AssertionError, match="取消支付.*无法验证|查询|可用状态"):
+        page.assert_payment_result(PaymentMethod.BALANCE)
+
+    assert captures and captures[-1][1] is True
+    assert "取消支付" not in driver.clicks
+
+
+@pytest.mark.parametrize("availability", ("absent", "disabled"))
+def test_paid_result_accepts_verified_absent_or_disabled_cancel_without_clicking(
+    availability,
+):
+    driver = OrderDriver(screen="order_detail", status="已支付")
+    driver.detail_decoys = False
+    driver.cancel_enabled = False
+    driver.cancel_action_present = availability == "disabled"
+    page = bind(ShippingPage(driver))
+
+    assert page.assert_payment_result(PaymentMethod.BALANCE) is True
+    assert "取消支付" not in driver.clicks
+
+
+@pytest.mark.parametrize("terminal", ("已支付", "货到付款", "已取消"))
+def test_terminal_order_detail_returns_by_verified_list_then_home_route(terminal):
+    driver = OrderDriver(screen="order_detail", status=terminal)
+    driver.detail_decoys = False
+    driver.cancel_enabled = False
+    page = bind(ShippingPage(driver))
+
+    assert page.return_from_terminal_order_detail_to_shipping_home() is True
+    assert driver.screen == "shipping_home"
+    assert driver.clicks == ["driver.back", "首页"]
+
+
+def test_terminal_order_detail_nonresponsive_back_fails_closed(monkeypatch):
+    driver = OrderDriver(screen="order_detail", status="已支付")
+    driver.detail_decoys = False
+    driver.cancel_enabled = False
+    driver.back_responsive = False
+    page = bind(ShippingPage(driver))
+    captures = []
+    monkeypatch.setattr(
+        page,
+        "capture_shipping_failure",
+        lambda stage, sensitive=False, redact_values=(), **_kwargs: captures.append(
+            (stage, sensitive, tuple(redact_values))
+        ),
+    )
+
+    assert page.return_from_terminal_order_detail_to_shipping_home() is False
+    assert driver.clicks == ["driver.back"]
+    assert captures and captures[-1][1] is True
+
+
+def test_terminal_order_detail_ambiguous_return_roots_fail_closed(monkeypatch):
+    driver = OrderDriver(screen="order_detail", status="货到付款")
+    driver.detail_decoys = False
+    driver.cancel_enabled = False
+    driver.ambiguous_navigation_after_back = True
+    page = bind(ShippingPage(driver))
+    captures = []
+    monkeypatch.setattr(
+        page,
+        "capture_shipping_failure",
+        lambda stage, sensitive=False, redact_values=(), **_kwargs: captures.append(
+            (stage, sensitive, tuple(redact_values))
+        ),
+    )
+
+    assert page.return_from_terminal_order_detail_to_shipping_home() is False
+    assert driver.clicks == ["driver.back"]
+    assert captures and captures[-1][1] is True
 
 
 def test_business_evidence_logs_mask_identity_and_include_method_state_and_cancel(monkeypatch):
@@ -739,6 +1019,24 @@ def test_demonstrably_nonsensitive_home_failure_retains_screenshot(monkeypatch):
     ShippingPage(driver).capture_shipping_failure("home_probe")
 
     assert calls[-1].include_screenshot is True
+
+
+@pytest.mark.parametrize(
+    "probe_error",
+    ("page_source_query_error", "sensitive_root_query_error"),
+)
+def test_sensitive_probe_error_hides_screenshot_with_verified_background_navigation(
+    monkeypatch, probe_error
+):
+    calls = _record_capture(monkeypatch)
+    driver = NavigationDriver("shipping_home")
+    setattr(driver, probe_error, True)
+    page = ShippingPage(driver)
+
+    assert page._active_navigation_identity() == "shipping_home"
+    page.capture_shipping_failure("probe_error_with_background_navigation")
+
+    assert calls[-1].include_screenshot is False
 
 
 def test_unknown_unverified_page_context_defaults_to_xml_only(monkeypatch):

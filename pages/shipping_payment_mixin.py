@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
+from enum import Enum
 
 from appium.webdriver.common.appiumby import AppiumBy
 
@@ -17,6 +19,26 @@ from .shipping_types import (
     parse_delivery_date,
     xpath_literal,
 )
+
+
+class _LookupState(str, Enum):
+    ABSENT = "absent"
+    UNIQUE = "unique"
+    AMBIGUOUS = "ambiguous"
+    ERROR = "error"
+
+
+@dataclass(frozen=True)
+class _RootLookup:
+    state: _LookupState
+    element: object | None = None
+
+
+class _AvailabilityState(str, Enum):
+    ABSENT = "absent"
+    DISABLED = "disabled"
+    ENABLED = "enabled"
+    ERROR = "error"
 
 
 class ShippingPaymentMixin:
@@ -79,6 +101,10 @@ class ShippingPaymentMixin:
         button = self._find_submit_order_button()
         if button is None:
             raise AssertionError("提交订单页未找到提交订单按钮")
+        pre_submit_context = self._snapshot_transition_context()
+        if pre_submit_context is None:
+            self._payment_failure("pre_submit_context_unverified")
+            raise AssertionError("提交订单前无法可靠快照支付页/订单详情身份")
         self._shipping_order_submitted = True
         try:
             button.click()
@@ -88,10 +114,19 @@ class ShippingPaymentMixin:
         if not self._wait_for_payment_or_order_detail():
             self._payment_failure("submit_transition_timeout")
             raise AssertionError("提交订单后未进入支付页或订单详情")
-        order_number = self._read_transition_order_number()
-        if not order_number:
+        observed = {}
+
+        def observe_fresh_order_identity():
+            order_number = self._fresh_transition_order_number(pre_submit_context)
+            if order_number is None:
+                return False
+            observed["order_number"] = order_number
+            return True
+
+        if not self._wait_until(observe_fresh_order_identity):
             self._payment_failure("submitted_order_identity_unverified")
             raise AssertionError("提交订单后未从专用节点确认新订单号/订单身份")
+        order_number = observed["order_number"]
         self._shipping_order_number = order_number
         logger.info(
             f"shipping_order_identity order={self._masked_order_number(order_number)} "
@@ -151,7 +186,10 @@ class ShippingPaymentMixin:
         return self.assert_payment_result(PaymentMethod.COD)
 
     def current_payment_state(self) -> OrderPaymentState:
-        if self._password_root() is not None or self._cancel_dialog_root() is not None:
+        if (
+            self._password_root_lookup().state is not _LookupState.ABSENT
+            or self._cancel_dialog_root_lookup().state is not _LookupState.ABSENT
+        ):
             return OrderPaymentState.UNKNOWN
         detail = self._verified_target_order_detail_root()
         if detail is None:
@@ -236,8 +274,12 @@ class ShippingPaymentMixin:
 
     def leave_balance_payment_unconfirmed(self) -> bool:
         """Select balance without entering a password, then require a pending order."""
+        password_lookup = self._password_root_lookup()
+        if password_lookup.state in {_LookupState.AMBIGUOUS, _LookupState.ERROR}:
+            self._payment_failure("balance_password_dialog_unverified")
+            raise AssertionError("支付密码弹窗查询失败或结果不唯一，无法安全验证")
         if (
-            self._password_root() is None
+            password_lookup.state is _LookupState.ABSENT
             and self.current_payment_state() is OrderPaymentState.PENDING
         ):
             return True
@@ -252,8 +294,12 @@ class ShippingPaymentMixin:
             ("确认支付", "立即支付"),
             "balance_payment_confirm_missing",
         )
-        password_root = self._password_root()
-        if password_root is not None:
+        password_lookup = self._password_root_lookup()
+        if password_lookup.state in {_LookupState.AMBIGUOUS, _LookupState.ERROR}:
+            self._payment_failure("balance_password_dialog_unverified")
+            raise AssertionError("支付密码弹窗查询失败或结果不唯一，无法安全验证")
+        password_root = password_lookup.element
+        if password_lookup.state is _LookupState.UNIQUE:
             dismissal = self._first_displayed_child(
                 password_root, self._relative_text_selector(("取消", "关闭", "返回"))
             )
@@ -389,8 +435,45 @@ class ShippingPaymentMixin:
         else:
             ok = self.pay_balance(pay_password)
         if ok:
-            ok = self.switch_to_shipping_home() and self.switch_to_delivery_orders()
+            ok = (
+                self.return_from_terminal_order_detail_to_shipping_home()
+                and self.switch_to_delivery_orders()
+            )
         return ok
+
+    def return_from_terminal_order_detail_to_shipping_home(self) -> bool:
+        """Leave the exact terminal detail via its verified order-list parent."""
+        terminal_states = {
+            OrderPaymentState.PAID,
+            OrderPaymentState.COD,
+            OrderPaymentState.CANCELLED,
+            OrderPaymentState.CLOSED,
+            OrderPaymentState.NONPAYABLE,
+        }
+        if (
+            self._verified_target_order_detail_root() is None
+            or self.current_payment_state() not in terminal_states
+        ):
+            self._payment_failure("terminal_order_detail_unverified_for_return")
+            return False
+        try:
+            self.driver.back()
+        except Exception as exc:
+            logger.debug(
+                "Terminal order detail back failed error_type=%s",
+                type(exc).__name__,
+            )
+            self._payment_failure("terminal_order_detail_back_failed")
+            return False
+        if not self._wait_until(self._is_delivery_orders_page):
+            self._payment_failure("terminal_order_list_return_unverified")
+            return False
+        if not self.switch_to_shipping_home():
+            return False
+        logger.info(
+            "shipping_navigation route=terminal_detail_to_orders_to_home result=success"
+        )
+        return True
 
     def _find_submit_order_button(self):
         for label in self._SUBMIT_ORDER_LABELS:
@@ -419,6 +502,65 @@ class ShippingPaymentMixin:
             return None
         return self._read_order_number_from_root(roots[0])
 
+    def _transition_context_roots(self) -> list[tuple[str, object]] | None:
+        roots = []
+        for kind, selector in (
+            ("payment", self._PAYMENT_PAGE_ROOT_SELECTOR),
+            ("order_detail", self._ORDER_DETAIL_ROOT_SELECTOR),
+        ):
+            try:
+                candidates = self.driver.find_elements(AppiumBy.XPATH, selector)
+            except Exception as exc:
+                logger.debug(
+                    "Submit transition root lookup failed error_type=%s",
+                    type(exc).__name__,
+                )
+                return None
+            for candidate in candidates:
+                try:
+                    displayed = bool(candidate.is_displayed())
+                except Exception as exc:
+                    logger.debug(
+                        "Submit transition root visibility failed error_type=%s",
+                        type(exc).__name__,
+                    )
+                    return None
+                if displayed:
+                    roots.append((kind, candidate))
+        return roots
+
+    def _snapshot_transition_context(self) -> frozenset[tuple[str, str]] | None:
+        roots = self._transition_context_roots()
+        if roots is None:
+            return None
+        identities = []
+        for kind, root in roots:
+            order_number = self._read_order_number_from_root(root)
+            if not order_number:
+                return None
+            identities.append((kind, order_number))
+        return frozenset(identities)
+
+    def _fresh_transition_order_number(
+        self, pre_submit_context: frozenset[tuple[str, str]]
+    ) -> str | None:
+        roots = self._transition_context_roots()
+        if roots is None or len(roots) != 1:
+            return None
+        kind, root = roots[0]
+        order_number = self._read_order_number_from_root(root)
+        if not order_number:
+            return None
+        prior_order_numbers = {
+            prior_order_number for _kind, prior_order_number in pre_submit_context
+        }
+        if (
+            order_number in prior_order_numbers
+            or (kind, order_number) in pre_submit_context
+        ):
+            return None
+        return order_number
+
     def _read_order_number_from_root(self, root) -> str | None:
         nodes = self._displayed_children(root, self._CONTEXT_ORDER_NUMBER_SELECTOR)
         if len(nodes) != 1:
@@ -440,23 +582,45 @@ class ShippingPaymentMixin:
         return self._single_displayed_root(self._PAYMENT_PAGE_ROOT_SELECTOR)
 
     def _password_root(self):
-        return self._single_displayed_root(self._PAYMENT_PASSWORD_ROOT_SELECTOR)
+        return self._password_root_lookup().element
+
+    def _password_root_lookup(self) -> _RootLookup:
+        return self._displayed_root_lookup(self._PAYMENT_PASSWORD_ROOT_SELECTOR)
 
     def _cancel_dialog_root(self):
-        return self._single_displayed_root(self._CANCEL_DIALOG_ROOT_SELECTOR)
+        return self._cancel_dialog_root_lookup().element
+
+    def _cancel_dialog_root_lookup(self) -> _RootLookup:
+        return self._displayed_root_lookup(self._CANCEL_DIALOG_ROOT_SELECTOR)
 
     def _single_displayed_root(self, selector: str):
+        return self._displayed_root_lookup(selector).element
+
+    def _displayed_root_lookup(self, selector: str) -> _RootLookup:
         try:
             candidates = self.driver.find_elements(AppiumBy.XPATH, selector)
         except Exception as exc:
             logger.debug(
                 "Payment context lookup failed error_type=%s", type(exc).__name__
             )
-            return None
-        displayed = [
-            candidate for candidate in candidates if self._is_displayed(candidate)
-        ]
-        return displayed[0] if len(displayed) == 1 else None
+            return _RootLookup(_LookupState.ERROR)
+        displayed = []
+        for candidate in candidates:
+            try:
+                is_displayed = bool(candidate.is_displayed())
+            except Exception as exc:
+                logger.debug(
+                    "Payment root visibility failed error_type=%s",
+                    type(exc).__name__,
+                )
+                return _RootLookup(_LookupState.ERROR)
+            if is_displayed:
+                displayed.append(candidate)
+        if not displayed:
+            return _RootLookup(_LookupState.ABSENT)
+        if len(displayed) == 1:
+            return _RootLookup(_LookupState.UNIQUE, displayed[0])
+        return _RootLookup(_LookupState.AMBIGUOUS)
 
     def _order_detail_roots(self) -> list:
         try:
@@ -579,21 +743,62 @@ class ShippingPaymentMixin:
 
     def _is_exact_pending_order_detail(self) -> bool:
         return (
-            self._password_root() is None
+            self._password_root_lookup().state is _LookupState.ABSENT
             and self.current_payment_state() is OrderPaymentState.PENDING
         )
 
     def _assert_cancel_unavailable(
         self, detail, *, redact_values: tuple[str, ...] = ()
     ) -> None:
-        cancel_actions = self._displayed_children(
-            detail, self._relative_text_selector(("取消支付",))
-        )
-        if any(self._is_enabled(action) for action in cancel_actions):
+        availability = self._cancel_availability(detail)
+        if availability is _AvailabilityState.ERROR:
+            self._payment_failure(
+                "paid_order_cancel_availability_unverified",
+                redact_values=redact_values,
+            )
+            raise AssertionError("取消支付操作查询或可用状态无法验证")
+        if availability is _AvailabilityState.ENABLED:
             self._payment_failure(
                 "paid_order_cancel_still_available", redact_values=redact_values
             )
             raise AssertionError("已支付/货到付款订单详情仍存在可用取消支付操作")
+
+    def _cancel_availability(self, detail) -> _AvailabilityState:
+        try:
+            candidates = detail.find_elements(
+                AppiumBy.XPATH, self._relative_text_selector(("取消支付",))
+            )
+        except Exception as exc:
+            logger.debug(
+                "Cancel availability lookup failed error_type=%s",
+                type(exc).__name__,
+            )
+            return _AvailabilityState.ERROR
+        displayed = []
+        for candidate in candidates:
+            try:
+                is_displayed = bool(candidate.is_displayed())
+            except Exception as exc:
+                logger.debug(
+                    "Cancel availability visibility failed error_type=%s",
+                    type(exc).__name__,
+                )
+                return _AvailabilityState.ERROR
+            if is_displayed:
+                displayed.append(candidate)
+        if not displayed:
+            return _AvailabilityState.ABSENT
+        for candidate in displayed:
+            try:
+                if candidate.is_enabled():
+                    return _AvailabilityState.ENABLED
+            except Exception as exc:
+                logger.debug(
+                    "Cancel availability enabled probe failed error_type=%s",
+                    type(exc).__name__,
+                )
+                return _AvailabilityState.ERROR
+        return _AvailabilityState.DISABLED
 
     @staticmethod
     def _unambiguous_payment_state(text: str) -> OrderPaymentState:

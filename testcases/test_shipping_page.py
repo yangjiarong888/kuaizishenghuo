@@ -1268,7 +1268,9 @@ def test_run_order_flow_cancels_only_a_confirmed_pending_order(monkeypatch):
     monkeypatch.setattr(page, "verify_checkout_ready", lambda: events.append("ready") or True)
     monkeypatch.setattr(page, "submit_order_once", lambda: events.append("submit") or "ORDER-1")
     monkeypatch.setattr(
-        page, "switch_to_shipping_home", lambda: events.append("return-home") or True
+        page,
+        "return_from_terminal_order_detail_to_shipping_home",
+        lambda: events.append("return-home") or True,
     )
 
     assert page.run_order_flow(
