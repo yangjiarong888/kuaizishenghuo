@@ -10,15 +10,27 @@ from pages.rounding_payment import (
 
 class FakeRoundingElement:
     def __init__(
-        self, page: "FakeRoundingPage", amount: int, change: float | None = None
+        self,
+        page: "FakeRoundingPage",
+        amount: int,
+        change: float | None = None,
+        *,
+        rounding_semantics: bool = True,
+        grouped: bool = False,
     ) -> None:
         self._page = page
         self._amount = amount
         self._change = change if change is not None else amount - page.total
+        self._rounding_semantics = rounding_semantics
+        self._grouped = grouped
 
     @property
     def text(self) -> str:
-        return f"取整金额 {self._amount} 找零 {self._change:.2f}"
+        amount = f"{self._amount:,}" if self._grouped else str(self._amount)
+        change = f"{self._change:,.2f}" if self._grouped else f"{self._change:.2f}"
+        if self._rounding_semantics:
+            return f"取整金额 {amount} 找零 {change}"
+        return f"SKU {amount} discount {change}"
 
     def is_displayed(self) -> bool:
         return True
@@ -41,6 +53,19 @@ class FakeRoundingDriver:
     def find_elements(self, _by: str, selector: str) -> list[FakeRoundingElement]:
         if self._page.incorrect_candidate_match:
             return [FakeRoundingElement(self._page, 12000, 10550)]
+        if self._page.semantic_decoy:
+            return [
+                FakeRoundingElement(
+                    self._page,
+                    2000,
+                    550,
+                    rounding_semantics=False,
+                )
+            ]
+        if self._page.grouped_only:
+            if '"2,000"' in selector and '"1,550"' in selector:
+                return [FakeRoundingElement(self._page, 2000, 1550, grouped=True)]
+            return []
         matches = []
         for amount in self._page.option_amounts:
             if str(amount) in selector:
@@ -60,12 +85,16 @@ class FakeRoundingPage(RoundingPaymentMixin):
         match_count: int = 1,
         show_candidate_readback: bool = False,
         incorrect_candidate_match: bool = False,
+        semantic_decoy: bool = False,
+        grouped_only: bool = False,
     ) -> None:
         self.total = total
         self.never_updates = never_updates
         self.match_count = match_count
         self.show_candidate_readback = show_candidate_readback
         self.incorrect_candidate_match = incorrect_candidate_match
+        self.semantic_decoy = semantic_decoy
+        self.grouped_only = grouped_only
         self.selected_amount: int | None = None
         self.option_amounts = [option.amount for option in compute_rounding_options(total)]
         self.driver = FakeRoundingDriver(self)
@@ -79,6 +108,14 @@ class FakeRoundingPage(RoundingPaymentMixin):
             change = self.selected_amount - self.total
             texts.append(f"取整金额 {self.selected_amount} 找零 {change:.2f}")
         return texts
+
+
+class CheckoutTextsPage(RoundingPaymentMixin):
+    def __init__(self, texts: list[str]) -> None:
+        self._texts = texts
+
+    def page_texts(self) -> list[str]:
+        return self._texts
 
 
 def test_rounding_options_for_370_are_strictly_higher_and_ordered() -> None:
@@ -119,6 +156,45 @@ def test_parse_checkout_money_requires_a_money_or_total_hint() -> None:
 
 def test_parse_checkout_money_ignores_an_unrelated_number_before_the_total() -> None:
     assert parse_checkout_money("商品编号 123，应付 ₱1,450.25") == 1450.25
+
+
+@pytest.mark.parametrize(
+    "texts",
+    [
+        ["合计 ₱100.00", "应付 ₱80.00"],
+        ["应付 ₱80.00", "合计 ₱100.00"],
+    ],
+)
+def test_checkout_payable_prioritizes_final_payable_over_total_regardless_of_order(
+    texts: list[str],
+) -> None:
+    assert CheckoutTextsPage(texts).checkout_payable_amount() == 80.0
+
+
+def test_checkout_payable_rejects_conflicting_final_payable_amounts() -> None:
+    page = CheckoutTextsPage(["应付 ₱80.00", "实付 ₱90.00"])
+
+    with pytest.raises(AssertionError, match="应付金额"):
+        page.checkout_payable_amount()
+
+
+def test_checkout_payable_rejects_a_one_cent_final_payable_conflict() -> None:
+    page = CheckoutTextsPage(["应付 ₱80.00", "实付 ₱80.01"])
+
+    with pytest.raises(AssertionError, match="应付金额"):
+        page.checkout_payable_amount()
+
+
+def test_checkout_payable_accepts_duplicate_final_amount_and_unique_total_fallback() -> None:
+    assert CheckoutTextsPage(["应付 ₱80.00", "实付 ₱80.00"]).checkout_payable_amount() == 80.0
+    assert CheckoutTextsPage(["合计 ₱100.00"]).checkout_payable_amount() == 100.0
+
+
+def test_checkout_payable_rejects_conflicting_total_fallbacks() -> None:
+    page = CheckoutTextsPage(["合计 ₱100.00", "总计 ₱110.00"])
+
+    with pytest.raises(AssertionError, match="合计金额"):
+        page.checkout_payable_amount()
 
 
 def test_custom_rounding_rejects_decimal_or_non_increasing_amount() -> None:
@@ -167,3 +243,17 @@ def test_selection_rejects_a_substring_match_for_another_option() -> None:
 
     with pytest.raises(AssertionError, match="唯一"):
         page.select_checkout_rounding_payment()
+
+
+def test_selection_rejects_a_unique_non_rounding_numeric_decoy() -> None:
+    page = FakeRoundingPage(total=1450, semantic_decoy=True)
+
+    with pytest.raises(AssertionError, match="唯一"):
+        page.select_checkout_rounding_payment()
+
+
+def test_selection_supports_grouped_amount_and_change_controls() -> None:
+    page = FakeRoundingPage(total=450, grouped_only=True)
+
+    assert page.select_checkout_rounding_payment(custom_amount=2000) == RoundingOption(2000, 1550)
+    assert page.selected_amount == 2000

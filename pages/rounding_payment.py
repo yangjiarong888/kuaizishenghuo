@@ -94,12 +94,39 @@ class RoundingPaymentMixin:
         return []
 
     def checkout_payable_amount(self) -> float | None:
-        for text in self._checkout_texts():
-            if any(label in text for label in ("应付", "实付", "支付金额", "合计", "总计")):
-                value = parse_checkout_money(text)
-                if value is not None:
-                    return value
+        texts = self._checkout_texts()
+        final_values = self._checkout_values_for_labels(
+            texts, ("应付", "实付", "支付金额")
+        )
+        if final_values:
+            return self._unique_checkout_value(final_values, "结算页应付金额")
+        total_values = self._checkout_values_for_labels(texts, ("合计", "总计"))
+        if total_values:
+            return self._unique_checkout_value(total_values, "结算页合计金额")
         return None
+
+    @staticmethod
+    def _checkout_values_for_labels(
+        texts: Iterable[str], labels: tuple[str, ...]
+    ) -> list[float]:
+        values = []
+        for text in texts:
+            if not any(label in text for label in labels):
+                continue
+            value = parse_checkout_money(text)
+            if value is not None:
+                values.append(value)
+        return values
+
+    @staticmethod
+    def _unique_checkout_value(values: Iterable[float], description: str) -> float:
+        unique_values = []
+        for value in values:
+            if value not in unique_values:
+                unique_values.append(value)
+        if len(unique_values) != 1:
+            raise AssertionError(f"{description}冲突，无法安全选择取整金额")
+        return unique_values[0]
 
     def _resolve_rounding_option(
         self, payable: float, custom_amount: float | None
@@ -139,17 +166,23 @@ class RoundingPaymentMixin:
         rounded = round(value, 2)
         compact = f"{rounded:g}"
         fixed = f"{rounded:.2f}"
-        return tuple(dict.fromkeys((compact, fixed)))
+        grouped_compact = f"{rounded:,g}"
+        grouped_fixed = f"{rounded:,.2f}"
+        return tuple(dict.fromkeys((compact, fixed, grouped_compact, grouped_fixed)))
+
+    @staticmethod
+    def _xpath_contains_any(terms: Iterable[str]) -> str:
+        return " or ".join(
+            f'contains(@text,"{term}") or contains(@content-desc,"{term}")'
+            for term in terms
+        )
 
     def _rounding_option_selector(self, option: RoundingOption) -> str:
-        amount = str(option.amount)
-        change_terms = " or ".join(
-            f'contains(@text,"{change}") or contains(@content-desc,"{change}")'
-            for change in self._money_texts(option.change)
-        )
+        amount_terms = (str(option.amount), f"{option.amount:,}")
+        amount_predicate = self._xpath_contains_any(amount_terms)
+        change_predicate = self._xpath_contains_any(self._money_texts(option.change))
         return (
-            f'//*[ (contains(@text,"{amount}") or contains(@content-desc,"{amount}")) '
-            f"and ({change_terms}) ]"
+            f"//*[ ({amount_predicate}) and ({change_predicate}) ]"
         )
 
     @staticmethod
@@ -182,6 +215,21 @@ class RoundingPaymentMixin:
         )
         return amount_matches and change_matches
 
+    @classmethod
+    def _element_has_rounding_semantics(cls, element: Any) -> bool:
+        text = cls._element_text(element).lower()
+        if ("取整" in text or "rounding" in text) and any(
+            marker in text for marker in ("找零", "找回", "余额", "change")
+        ):
+            return True
+        try:
+            resource_id = str(element.get_attribute("resource-id") or "").lower()
+        except Exception:
+            resource_id = ""
+        return "rounding" in resource_id and any(
+            marker in resource_id for marker in ("change", "option", "amount")
+        )
+
     def _click_unique_rounding_option(self, option: RoundingOption) -> None:
         driver = getattr(self, "driver", None)
         if driver is None:
@@ -196,6 +244,7 @@ class RoundingPaymentMixin:
             element
             for element in self._visible_enabled(elements)
             if self._element_represents_option(element, option)
+            and self._element_has_rounding_semantics(element)
         ]
         if len(matches) != 1:
             raise AssertionError("取整选项必须唯一且可用")
@@ -224,6 +273,7 @@ class RoundingPaymentMixin:
             element
             for element in self._visible_enabled(elements)
             if self._element_represents_option(element, option)
+            and self._element_has_rounding_semantics(element)
         ]
         if len(matches) != 1:
             return False
