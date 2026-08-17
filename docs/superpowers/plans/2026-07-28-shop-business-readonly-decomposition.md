@@ -35,7 +35,7 @@
 - Consumes: `self.driver`, `self._mall_ctx`, `self._window_size()`, `self._nearest_clickable_ancestor()`, `self._first_displayed_by_pkg_id()`, `self.ensure_mall_tab()`, `self.tap_top_back()`, and `self._current_activity_contains(name)`.
 - Produces: `MallBusinessSearchMixin`; compatible `search_goods(keyword: str) -> bool` and the existing search/helper public surface on `ShopBusinessPage`.
 
-- [ ] **Step 1: Write the failing search-mixin behavior tests**
+- [x] **Step 1: Write the failing search-mixin behavior tests**
 
 Create `testcases/test_shop_business_decomposition.py`:
 
@@ -150,7 +150,7 @@ def test_empty_search_stops_before_page_navigation():
     assert page.events == []
 ```
 
-- [ ] **Step 2: Run the new test and verify RED**
+- [x] **Step 2: Run the new test and verify RED**
 
 Run:
 
@@ -160,7 +160,7 @@ Run:
 
 Expected: collection fails with `ModuleNotFoundError: pages.shop_business_search_mixin`.
 
-- [ ] **Step 3: Create the search mixin and move the exact methods**
+- [x] **Step 3: Create the search mixin and move the exact methods**
 
 Create `pages/shop_business_search_mixin.py` with these imports:
 
@@ -217,7 +217,7 @@ search_goods
 
 Do not move `_current_activity_contains`, checkout/address helpers, random category methods, random add-cart methods, or `run_category_and_activity_explore`.
 
-- [ ] **Step 4: Compose the search mixin into the facade**
+- [x] **Step 4: Compose the search mixin into the facade**
 
 In `pages/shop_business_page.py`:
 
@@ -234,7 +234,7 @@ class ShopBusinessPage(
 
 Remove only imports that are no longer used by the remaining facade. Keep `re` because the facade still owns `parse_price_text`, and keep `AppiumBy`, `random`, and `time` for remaining methods.
 
-- [ ] **Step 5: Run focused tests and verify GREEN**
+- [x] **Step 5: Run focused tests and verify GREEN**
 
 Run:
 
@@ -247,7 +247,7 @@ Run:
 
 Expected: all selected tests pass.
 
-- [ ] **Step 6: Compile and commit the search extraction**
+- [x] **Step 6: Compile and commit the search extraction**
 
 Run:
 
@@ -274,7 +274,7 @@ Expected: compilation succeeds and `logs/` is not staged.
 - Consumes: `search_goods(keyword)`, shared interaction helpers from `MallBusinessSearchMixin`, and list/detail capabilities from `ShopHomePage`.
 - Produces: `MallBusinessDetailMixin`; compatible `open_goods_detail(keyword: Optional[str] = None) -> bool`; `parse_price_text(raw: str) -> Optional[float]` in the detail module and re-exported from the facade.
 
-- [ ] **Step 1: Add failing detail sequence and compatibility tests**
+- [x] **Step 1: Add failing detail sequence and compatibility tests**
 
 Append to `testcases/test_shop_business_decomposition.py`:
 
@@ -381,7 +381,7 @@ def test_facade_reexports_price_parser():
     assert facade_parse_price_text("₱33.00") == 33.0
 ```
 
-- [ ] **Step 2: Run the detail tests and verify RED**
+- [x] **Step 2: Run the detail tests and verify RED**
 
 Run:
 
@@ -391,7 +391,7 @@ Run:
 
 Expected: collection fails with `ModuleNotFoundError: pages.shop_business_detail_mixin`.
 
-- [ ] **Step 3: Create the detail mixin and move the exact methods**
+- [x] **Step 3: Create the detail mixin and move the exact methods**
 
 Create `pages/shop_business_detail_mixin.py`:
 
@@ -469,7 +469,7 @@ def parse_price_text(raw: str) -> Optional[float]:
     return float(m.group(1))
 ```
 
-- [ ] **Step 4: Compose the detail mixin and preserve the parser export**
+- [x] **Step 4: Compose the detail mixin and preserve the parser export**
 
 In `pages/shop_business_page.py`:
 
@@ -490,7 +490,7 @@ class ShopBusinessPage(
 
 Delete the old local `parse_price_text` definition. Remove only locator imports that no remaining facade method uses.
 
-- [ ] **Step 5: Run focused and full non-device regression**
+- [x] **Step 5: Run focused and full non-device regression**
 
 Run:
 
@@ -505,7 +505,7 @@ Run:
 
 Expected: all focused and non-device tests pass with zero failures.
 
-- [ ] **Step 6: Compile and commit the detail extraction**
+- [x] **Step 6: Compile and commit the detail extraction**
 
 Run:
 
@@ -533,7 +533,7 @@ Expected: compilation succeeds and `logs/` remains untracked.
 - Consumes: final facade and mixins from Tasks 1-2.
 - Produces: exact offline evidence, size metrics, wait/exception counts, and proof that strict navigation rejects mutation flags.
 
-- [ ] **Step 1: Run all mall-focused and full non-device tests**
+- [x] **Step 1: Run all mall-focused and full non-device tests**
 
 Run:
 
@@ -548,7 +548,7 @@ $tests = @(Get-ChildItem testcases -Filter 'test_mall_order_*.py' |
 
 Record exact pass and deselected counts.
 
-- [ ] **Step 2: Compile all Python files in memory**
+- [x] **Step 2: Compile all Python files in memory**
 
 Run:
 
@@ -558,7 +558,7 @@ Run:
 
 Record the exact compiled file count.
 
-- [ ] **Step 3: Verify facade size and combined residual counts**
+- [x] **Step 3: Verify facade size and combined residual counts**
 
 Run:
 
@@ -580,7 +580,7 @@ Acceptance:
 - fixed-wait count is at most `52`;
 - broad-exception count is at most `47`.
 
-- [ ] **Step 4: Verify imports, MRO, parser export, and navigation safety**
+- [x] **Step 4: Verify imports, MRO, parser export, and navigation safety**
 
 Run:
 
@@ -596,7 +596,7 @@ Expected:
 - compatibility command prints `compatibility=ok`;
 - invalid CLI combination exits `2` before Driver creation and reports a navigation-only conflict.
 
-- [ ] **Step 5: Review the final diff**
+- [x] **Step 5: Review the final diff**
 
 Run:
 
@@ -620,7 +620,7 @@ Verify that only the planned files are modified and `logs/` is not staged.
 - Consumes: connected Android device `P7T4XC99CYAEYL4H`, Appium on `127.0.0.1:4723`, and the verified strict navigation CLI.
 - Produces: exit-code evidence, screenshot, sanitized XML, zero-mutation log review, residual-risk report, and completed plan checkboxes.
 
-- [ ] **Step 1: Reconfirm device and Appium without changing settings**
+- [x] **Step 1: Reconfirm device and Appium without changing settings**
 
 Run:
 
@@ -634,7 +634,7 @@ Invoke-RestMethod -Uri 'http://127.0.0.1:4723/status'
 
 Expected: the configured serial is `device`, Appium is ready, and no setting is changed.
 
-- [ ] **Step 2: Run only strict navigation verification**
+- [x] **Step 2: Run only strict navigation verification**
 
 Run:
 
@@ -650,7 +650,7 @@ Run:
 
 Forbidden flags include every `--allow-*` mutation capability, `--submit-order`, address actions, cart actions, exception modes, IM, and cancellation.
 
-- [ ] **Step 3: Inspect evidence and confirm zero business-data mutation**
+- [x] **Step 3: Inspect evidence and confirm zero business-data mutation**
 
 Verify:
 
@@ -663,7 +663,7 @@ Verify:
 
 Do not claim device compatibility for excluded flows.
 
-- [ ] **Step 4: Write the review report**
+- [x] **Step 4: Write the review report**
 
 Create `docs/reviews/2026-07-28-shop-business-readonly-decomposition-review.md` with:
 
@@ -677,7 +677,7 @@ Create `docs/reviews/2026-07-28-shop-business-readonly-decomposition-review.md` 
 - excluded device coverage;
 - next recommended wait/exception governance batch.
 
-- [ ] **Step 5: Mark the plan complete and commit the report**
+- [x] **Step 5: Mark the plan complete and commit the report**
 
 Mark all completed checkboxes in this plan, then run:
 
