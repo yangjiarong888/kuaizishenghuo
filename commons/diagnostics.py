@@ -23,6 +23,7 @@ _SHORT_CODE_ATTRIBUTE = re.compile(
     r"((?:text|content-desc)\s*=\s*[\"'])\d{4,8}([\"'])"
 )
 _REDACTION_TOKEN = "[REDACTED]"
+_CREDENTIAL_ATTRIBUTE_PARTS = frozenset({"password", "passwd", "pwd", "token"})
 _XML_CHARACTER_PATTERNS = {
     "&": r"(?:&(?:amp|#0*38|#x0*26);|&)",
     "<": r"(?:&(?:lt|#0*60|#x0*3c);|<)",
@@ -77,6 +78,16 @@ def redact_explicit_values(
     return sanitized
 
 
+def _is_credential_attribute_name(name: str) -> bool:
+    normalized = re.sub(r"[^a-z0-9]+", "_", (name or "").lower()).strip("_")
+    parts = tuple(part for part in normalized.split("_") if part)
+    if any(part in _CREDENTIAL_ATTRIBUTE_PARTS for part in parts):
+        return True
+    if normalized.endswith(tuple(_CREDENTIAL_ATTRIBUTE_PARTS)):
+        return True
+    return "verification" in parts and "code" in parts
+
+
 def sanitize_xml(text: str, redact_values: Iterable[str] = ()) -> str:
     """Redact only XML attribute/text values and keep a parseable artifact."""
     source = text or ""
@@ -95,14 +106,7 @@ def sanitize_xml(text: str, redact_values: Iterable[str] = ()) -> str:
 
     for element in root.iter():
         for name, value in tuple(element.attrib.items()):
-            if name.lower() in {
-                "password",
-                "passwd",
-                "pwd",
-                "verification_code",
-                "pay_password",
-                "token",
-            }:
+            if _is_credential_attribute_name(name):
                 element.set(name, _REDACTION_TOKEN)
             elif name in {"text", "content-desc"} and re.fullmatch(
                 r"\d{4,8}", value or ""

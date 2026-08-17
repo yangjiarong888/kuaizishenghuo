@@ -127,6 +127,30 @@ def test_capture_failure_redacts_explicit_sensitive_values_from_xml(tmp_path):
     assert "[REDACTED]" in xml
 
 
+def test_sanitize_xml_redacts_credential_attribute_name_variants():
+    from commons.diagnostics import sanitize_xml
+
+    source = (
+        '<hierarchy><node data-token="RAW_TOKEN" '
+        'user_password="RAW_PASSWORD" '
+        'verification-code="RAW_CODE" '
+        'pay-password="RAW_PAY_PASSWORD" /></hierarchy>'
+    )
+
+    sanitized = sanitize_xml(source)
+    root = ElementTree.fromstring(sanitized)
+    attributes = next(root.iter("node")).attrib
+
+    assert attributes == {
+        "data-token": "[REDACTED]",
+        "user_password": "[REDACTED]",
+        "verification-code": "[REDACTED]",
+        "pay-password": "[REDACTED]",
+    }
+    for secret in ("RAW_TOKEN", "RAW_PASSWORD", "RAW_CODE", "RAW_PAY_PASSWORD"):
+        assert secret not in sanitized
+
+
 def test_capture_failure_redacts_mixed_xml_entity_encodings_without_corrupting_xml(
     tmp_path,
 ):
