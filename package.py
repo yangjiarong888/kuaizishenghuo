@@ -34,7 +34,17 @@ def build_parser() -> argparse.ArgumentParser:
         default=AddressPolicy.AUTO.value,
     )
     parser.add_argument("--session", default="shipping_business")
-    parser.add_argument("--quit-driver", action="store_true")
+    driver_lifecycle = parser.add_mutually_exclusive_group()
+    driver_lifecycle.add_argument(
+        "--keep-driver",
+        action="store_true",
+        help="Keep the Appium session open; this can leave the Appium IME active",
+    )
+    driver_lifecycle.add_argument(
+        "--quit-driver",
+        action="store_true",
+        help="Deprecated compatibility flag; drivers now close by default",
+    )
     return parser
 
 
@@ -106,7 +116,7 @@ def main(
         )
         return 0 if ok else 1
     finally:
-        if args.quit_driver:
+        if not args.keep_driver:
             manager.close_driver(session_name=args.session)
 
 

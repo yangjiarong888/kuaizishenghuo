@@ -47,6 +47,7 @@ class DriverManager:
             else config_manager.get_default_config()
         )
         logger.info("创建新的驱动实例: %s", session_name)
+        driver = None
         try:
             driver = webdriver.Remote(
                 command_executor=config.appium_server_url,
@@ -56,6 +57,15 @@ class DriverManager:
             driver.implicitly_wait(0)
         except Exception as exc:
             self._drivers.pop(session_name, None)
+            if driver is not None:
+                try:
+                    driver.quit()
+                except Exception as cleanup_exc:
+                    logger.warning(
+                        "driver creation cleanup failed session=%s error_type=%s",
+                        session_name,
+                        type(cleanup_exc).__name__,
+                    )
             logger.error(
                 "创建驱动失败 session=%s error_type=%s",
                 session_name,

@@ -42,6 +42,56 @@ def test_cli_defaults_to_balance_and_auto_address():
     assert args.cancel_unpaid is False
 
 
+def test_cli_closes_driver_by_default_to_restore_system_keyboard(monkeypatch):
+    calls = []
+
+    class FakeManager:
+        def get_driver(self, *, session_name):
+            calls.append(("get_driver", session_name))
+            return object()
+
+        def close_driver(self, *, session_name):
+            calls.append(("close_driver", session_name))
+
+    class FakeShippingPage:
+        def __init__(self, driver):
+            pass
+
+        def run_order_flow(self, **kwargs):
+            return True
+
+    monkeypatch.setattr(package, "DriverManager", FakeManager)
+    monkeypatch.setattr(package, "ShippingPage", FakeShippingPage)
+
+    assert package.main([], environ=complete_env()) == 0
+    assert calls[-1] == ("close_driver", "shipping_business")
+
+
+def test_keep_driver_is_an_explicit_opt_out_of_keyboard_restore(monkeypatch):
+    calls = []
+
+    class FakeManager:
+        def get_driver(self, *, session_name):
+            calls.append(("get_driver", session_name))
+            return object()
+
+        def close_driver(self, *, session_name):
+            calls.append(("close_driver", session_name))
+
+    class FakeShippingPage:
+        def __init__(self, driver):
+            pass
+
+        def run_order_flow(self, **kwargs):
+            return True
+
+    monkeypatch.setattr(package, "DriverManager", FakeManager)
+    monkeypatch.setattr(package, "ShippingPage", FakeShippingPage)
+
+    assert package.main(["--keep-driver"], environ=complete_env()) == 0
+    assert all(call[0] != "close_driver" for call in calls)
+
+
 def test_cod_rejects_cancel_unpaid_before_driver_creation(monkeypatch):
     created = []
     monkeypatch.setattr(package, "DriverManager", lambda: created.append(True))
@@ -159,10 +209,7 @@ def test_main_runs_one_flow_with_validated_policy(
         assert received_address.match == "Test Recipient"
     else:
         assert received_address.missing_for_add() == ()
-    if "--quit-driver" in argv:
-        assert calls[-1] == ("close_driver", "shipping_business")
-    else:
-        assert all(call[0] != "close_driver" for call in calls)
+    assert calls[-1] == ("close_driver", "shipping_business")
 
 
 def test_cli_logs_never_contain_password_or_full_address(monkeypatch, caplog):
@@ -174,6 +221,9 @@ def test_cli_logs_never_contain_password_or_full_address(monkeypatch, caplog):
     class FakeManager:
         def get_driver(self, *, session_name):
             return object()
+
+        def close_driver(self, *, session_name):
+            pass
 
     class FakeShippingPage:
         def __init__(self, driver):
