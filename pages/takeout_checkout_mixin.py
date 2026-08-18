@@ -2757,7 +2757,7 @@ class TakeoutCheckoutMixin(
         if rounding_payment and pay_mode != "cod":
             raise AssertionError("取整支付仅支持 COD 货到付款")
         payable_limit = None
-        if submit_order and max_payable is not None:
+        if submit_order:
             try:
                 payable_limit = float(max_payable)
             except (TypeError, ValueError):
@@ -2817,6 +2817,9 @@ class TakeoutCheckoutMixin(
         )
         if pay_mode == "cod":
             if not self.shop_select_cash_on_delivery_payment():
+                if submit_order or rounding_payment:
+                    logger.error("货到付款未点到，终止支付流程")
+                    return False
                 logger.warning("货到付款未点到，请检查支付方式树")
         else:
             if not self.shop_select_balance_payment():

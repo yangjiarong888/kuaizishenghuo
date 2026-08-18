@@ -54,6 +54,9 @@ class RecordingCheckout(TakeoutCheckoutMixin):
         self.events.append("delivery")
         return True
 
+    def checkout_payable_amount(self):
+        return 100.0
+
     def shop_enter_pay_password(self, password="legacy-default"):
         self.events.append(("auto-password", password))
         return True
@@ -96,6 +99,7 @@ def test_balance_submission_waits_for_manual_payment_then_cancels(
         submit_order=True,
         checkout_payment="balance",
         manual_payment_timeout=90.0,
+        max_payable=500,
     )
 
     assert page.confirm_count == 2
@@ -114,6 +118,7 @@ def test_cod_submission_skips_manual_payment(monkeypatch) -> None:
     assert page.run_shop_checkout_pay_and_cancel_flow(
         submit_order=True,
         checkout_payment="cod",
+        max_payable=500,
     )
 
     assert page.confirm_count == 2
@@ -133,6 +138,7 @@ def test_manual_payment_timeout_stops_before_cancel(monkeypatch) -> None:
         submit_order=True,
         checkout_payment="balance",
         manual_payment_timeout=30.0,
+        max_payable=500,
     )
 
     assert ("manual-payment", 30.0) in page.events

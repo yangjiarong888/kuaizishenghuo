@@ -15,8 +15,14 @@ def _avoid_checkout_sleeps(monkeypatch):
 
 
 class FakeTakeoutCheckout(TakeoutCheckoutMixin):
-    def __init__(self, *, payable: float = 425.0) -> None:
+    def __init__(
+        self,
+        *,
+        payable: float = 425.0,
+        cod_selection_ok: bool = True,
+    ) -> None:
         self.payable = payable
+        self.cod_selection_ok = cod_selection_ok
         self.events: list[str] = []
         self.confirm_count = 0
 
@@ -58,7 +64,7 @@ class FakeTakeoutCheckout(TakeoutCheckoutMixin):
 
     def shop_select_cash_on_delivery_payment(self):
         self.events.append("cod")
-        return True
+        return self.cod_selection_ok
 
     def shop_open_delivery_time_and_pick_future_slot(self, **kwargs):
         self.events.append("delivery")
@@ -140,7 +146,10 @@ def test_takeout_rounded_amount_above_limit_stops_before_submit():
     assert not getattr(page, "_takeout_order_submitted", False)
 
 
-@pytest.mark.parametrize("max_payable", [0, -1, float("nan"), float("inf")])
+@pytest.mark.parametrize(
+    "max_payable",
+    [None, 0, -1, float("nan"), float("inf"), float("-inf")],
+)
 def test_takeout_submit_requires_finite_positive_limit(max_payable):
     page = FakeTakeoutCheckout()
 
@@ -151,6 +160,31 @@ def test_takeout_submit_requires_finite_positive_limit(max_payable):
             max_payable=max_payable,
         )
 
+    assert page.events == []
+
+
+@pytest.mark.parametrize(
+    ("submit_order", "rounding_payment"),
+    [(True, False), (False, True)],
+)
+def test_takeout_required_cod_selection_failure_stops_before_later_checkout(
+    submit_order,
+    rounding_payment,
+):
+    page = FakeTakeoutCheckout(cod_selection_ok=False)
+
+    assert page.run_shop_checkout_pay_and_cancel_flow(
+        submit_order=submit_order,
+        checkout_payment="cod",
+        rounding_payment=rounding_payment,
+        rounding_amount=500 if rounding_payment else None,
+        max_payable=500 if submit_order else None,
+    ) is False
+
+    assert page.events[-1] == "cod"
+    assert "delivery" not in page.events
+    assert not any(event.startswith("rounding") for event in page.events)
+    assert not any(event.startswith("payable") for event in page.events)
     assert "submit" not in page.events
 
 
