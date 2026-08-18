@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import random
 import re
 import time
@@ -678,6 +679,22 @@ class MallOrderCheckoutMixin:
                 return m.group(1)
         return None
 
+    @staticmethod
+    def extract_order_identities(blob: str) -> List[str]:
+        patterns = (
+            r"(?:预订单号|预订单|订单编号|订单号)\s*[:：=]?\s*"
+            r"([A-Za-z0-9_-]{6,})",
+            r"(?:preOrderNo|pre_order_no|orderNo|order_no|orderId|order_id)"
+            r'["\s:=]+([A-Za-z0-9_-]{6,})',
+        )
+        identities = []
+        for pattern in patterns:
+            for match in re.finditer(pattern, blob, flags=re.I):
+                identity = match.group(1).strip()
+                if identity:
+                    identities.append(identity)
+        return identities
+
     def assert_preorder_api_called(self, log_blob: str) -> None:
         if self.skip_api_log_assert:
             logger.info("已跳过预订单接口 logcat 断言")
@@ -909,24 +926,44 @@ class MallOrderCheckoutMixin:
         expected_change: float,
     ) -> None:
         self.ensure_order_detail_page()
-        detail_order_no = self.extract_order_no(self.page_blob())
-        if not detail_order_no:
+        detail_order_nos = self.extract_order_identities(self.page_blob())
+        normalized_order_nos = {
+            order_no.casefold() for order_no in detail_order_nos
+        }
+        submitted_order_no = str(submit.order_no or "").strip().casefold()
+        if not normalized_order_nos:
             raise AssertionError("订单详情页未解析到本次订单号，无法校验取整找零")
-        if detail_order_no != submit.order_no:
+        if (
+            len(normalized_order_nos) != 1
+            or not submitted_order_no
+            or submitted_order_no not in normalized_order_nos
+        ):
             raise AssertionError(
-                "订单详情订单号与本次提交不一致：%s != %s"
-                % (detail_order_no, submit.order_no)
+                "订单详情订单号冲突或与本次提交不一致：%s != %s"
+                % (detail_order_nos, submit.order_no)
             )
 
         texts = self.page_texts()
         change_values = []
-        for index, text in enumerate(texts):
+        conflicting_markers = (
+            "应付",
+            "实付",
+            "支付金额",
+            "合计",
+            "总计",
+            "总额",
+            "商品金额",
+            "运费",
+            "优惠",
+        )
+        for text in texts:
             if not any(marker in text for marker in ("找零", "找回", "存入余额")):
                 continue
-            for candidate in texts[index : index + 2]:
-                value = parse_money(candidate)
-                if value is not None and value not in change_values:
-                    change_values.append(value)
+            if any(marker in text for marker in conflicting_markers):
+                continue
+            value = parse_money(text)
+            if value is not None and value not in change_values:
+                change_values.append(value)
         expected = round(float(expected_change), 2)
         if len(change_values) != 1 or round(change_values[0], 2) != expected:
             raise AssertionError(
@@ -1025,12 +1062,16 @@ class MallOrderCheckoutMixin:
         self,
         amounts: AmountSnapshot,
     ) -> None:
-        if self.max_payable is None or self.max_payable <= 0:
-            raise AssertionError("真实提交缺少正数 --max-payable")
-        if amounts.payable > self.max_payable:
+        try:
+            max_payable = float(self.max_payable)
+        except (TypeError, ValueError):
+            max_payable = float("nan")
+        if not math.isfinite(max_payable) or max_payable <= 0:
+            raise AssertionError("真实提交缺少有限正数 --max-payable")
+        if amounts.payable > max_payable:
             raise AssertionError(
                 "确认页实付 %.2f 超过 --max-payable %.2f"
-                % (amounts.payable, self.max_payable)
+                % (amounts.payable, max_payable)
             )
 
     def finish_checkout(

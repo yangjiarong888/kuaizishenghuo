@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import html
+import math
 import os
 import re
 import sys
@@ -913,7 +914,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--rounding-amount",
         type=float,
         default=None,
-        help="自定义货到付款取整金额；必须同时传 --rounding-payment",
+        help="自定义有限货到付款取整金额；必须同时传 --rounding-payment",
     )
     parser.add_argument(
         "--submit-order",
@@ -929,7 +930,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-payable",
         type=float,
         default=None,
-        help="本次允许提交的最大实付金额；真实下单必须显式提供正数",
+        help="本次允许提交的有限正数最大实付金额；真实下单必须显式提供",
     )
     parser.add_argument(
         "--cancel-created-order",
@@ -1016,8 +1017,17 @@ def validate_args(args) -> None:
     """Reject unsafe or contradictory mall capabilities before Driver creation."""
     if args.rounding_amount is not None and not args.rounding_payment:
         raise ValueError("--rounding-amount requires --rounding-payment")
+    if (
+        args.rounding_amount is not None
+        and not math.isfinite(args.rounding_amount)
+    ):
+        raise ValueError("--rounding-amount must be finite")
     if args.rounding_payment and args.payment_method != "cod":
         raise ValueError("COD rounding requires --payment-method cod")
+    if args.max_payable is not None and (
+        not math.isfinite(args.max_payable) or args.max_payable <= 0
+    ):
+        raise ValueError("--max-payable must be finite and positive")
 
     address_mutation = any(
         (
@@ -1077,9 +1087,9 @@ def validate_args(args) -> None:
             raise ValueError(
                 "order creation requires explicit --allow-order-creation"
             )
-        if args.max_payable is None or args.max_payable <= 0:
+        if args.max_payable is None:
             raise ValueError(
-                "order creation requires positive --max-payable"
+                "order creation requires finite positive --max-payable"
             )
 
     if args.cancel_created_order and not (

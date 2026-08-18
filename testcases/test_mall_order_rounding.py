@@ -115,6 +115,20 @@ def test_rounded_amount_above_max_payable_stops_before_submit():
     assert "submit:500" not in page.events
 
 
+@pytest.mark.parametrize("max_payable", [float("nan"), float("inf")])
+def test_non_finite_max_payable_stops_before_submit(max_payable):
+    page = FakeMallCheckout(
+        rounding_payment=True,
+        rounding_amount=500,
+        max_payable=max_payable,
+    )
+
+    with pytest.raises(AssertionError, match="max-payable|有限|正数"):
+        page.finish_checkout(PRODUCT, submit_order=True)
+
+    assert "submit:500" not in page.events
+
+
 def test_rounding_detail_must_match_the_submitted_order():
     page = FakeMallCheckout(rounding_payment=True, rounding_amount=500)
     page.detail_order_no = "ORDER-OTHER"
@@ -128,4 +142,42 @@ def test_rounding_detail_must_show_the_selected_change():
     page.detail_change = 74.0
 
     with pytest.raises(AssertionError, match="找零|75"):
+        page.finish_checkout(PRODUCT, submit_order=True)
+
+
+def test_rounding_detail_rejects_payable_amount_after_unvalued_change_label():
+    page = FakeMallCheckout(rounding_payment=True, rounding_amount=500)
+    page.page_texts = lambda: [
+        "订单号：ORDER-ROUND",
+        "找零",
+        "应付金额：₱75.00",
+    ]
+    page.page_blob = lambda: "\n".join(page.page_texts())
+
+    with pytest.raises(AssertionError, match="找零|未解析"):
+        page.finish_checkout(PRODUCT, submit_order=True)
+
+
+def test_rounding_detail_allows_duplicate_same_order_identity():
+    page = FakeMallCheckout(rounding_payment=True, rounding_amount=500)
+    page.page_texts = lambda: [
+        "订单号：ORDER-ROUND",
+        "orderNo=order-round",
+        "找零存入余额：₱75.00",
+    ]
+    page.page_blob = lambda: "\n".join(page.page_texts())
+
+    page.finish_checkout(PRODUCT, submit_order=True)
+
+
+def test_rounding_detail_rejects_conflicting_order_identities():
+    page = FakeMallCheckout(rounding_payment=True, rounding_amount=500)
+    page.page_texts = lambda: [
+        "订单号：ORDER-ROUND",
+        "orderNo=ORDER-OTHER",
+        "找零存入余额：₱75.00",
+    ]
+    page.page_blob = lambda: "\n".join(page.page_texts())
+
+    with pytest.raises(AssertionError, match="订单号|冲突|本次订单"):
         page.finish_checkout(PRODUCT, submit_order=True)

@@ -1,6 +1,7 @@
 import pytest
 
 import scripts.run_mall_order_flow as mall_cli
+from pages.rounding_payment import RoundingPaymentMixin
 
 
 pytestmark = pytest.mark.unit
@@ -73,3 +74,38 @@ def test_rounding_invalid_combinations_return_two_before_driver(argv, monkeypatc
     )
 
     assert mall_cli.main(argv) == 2
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["--max-payable", "nan"],
+        ["--max-payable", "inf"],
+        [
+            "--submit-order",
+            "--allow-order-creation",
+            "--max-payable",
+            "nan",
+        ],
+        [
+            "--submit-order",
+            "--allow-order-creation",
+            "--max-payable",
+            "inf",
+        ],
+        ["--rounding-payment", "--rounding-amount", "nan"],
+        ["--rounding-payment", "--rounding-amount", "inf"],
+    ],
+)
+def test_non_finite_safety_amounts_return_two_before_driver(argv, monkeypatch):
+    monkeypatch.setattr(
+        mall_cli.DriverManager,
+        "get_driver",
+        lambda *args, **kwargs: pytest.fail("driver must not be created"),
+    )
+
+    assert mall_cli.main(argv) == 2
+
+
+def test_mall_order_flow_composes_rounding_payment_mixin():
+    assert RoundingPaymentMixin in mall_cli.MallOrderFlow.__mro__
