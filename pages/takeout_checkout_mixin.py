@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import html
+import math
 import random
 import re
 import time
@@ -37,8 +38,13 @@ DEFAULT_REMARK_TEXT = "test order"
 
 from pages.takeout_delivery_time_mixin import TakeoutDeliveryTimeMixin
 from pages.takeout_cancel_order_mixin import TakeoutCancelOrderMixin
+from pages.rounding_payment import RoundingPaymentMixin
 
-class TakeoutCheckoutMixin(TakeoutDeliveryTimeMixin, TakeoutCancelOrderMixin):
+class TakeoutCheckoutMixin(
+    RoundingPaymentMixin,
+    TakeoutDeliveryTimeMixin,
+    TakeoutCancelOrderMixin,
+):
 
     def _maybe_zero_implicit_wait(self):
         """TakeoutPageBase 提供 _zero_implicit_wait；纯 Mixin 无该属性时用空上下文。"""
@@ -2709,6 +2715,9 @@ class TakeoutCheckoutMixin(TakeoutDeliveryTimeMixin, TakeoutCancelOrderMixin):
         delivery_slot_contains: Optional[str] = None,
         delivery_time_slot_ordinal: Optional[int] = None,
         checkout_payment: str = "balance",
+        rounding_payment: bool = False,
+        rounding_amount: float | None = None,
+        max_payable: float | None = None,
         coupon_policy: str = "auto",
         pickup_code: str = "keep",
         notify_method: str = "keep",
@@ -2720,10 +2729,42 @@ class TakeoutCheckoutMixin(TakeoutDeliveryTimeMixin, TakeoutCancelOrderMixin):
         ``submit_order`` 默认为 ``False``，结算准备完成后停在最终确认前。
         ``checkout_payment`` 为 ``balance`` 时由用户在真机手动输入支付密码；
         ``cod`` / 传 ``\"货到付款\"`` 时跳过手动支付等待。
+        ``rounding_payment`` 仅支持 COD；CLI 真实提交必须提供有限正数
+        ``max_payable``，传入上限时最终应付不得超过它。
         ``coupon_policy``：外卖同时处理平台优惠券、商家优惠券；``auto`` 有可用就选，
         ``skip`` 跳过，``require`` 要求至少选中一类。
         备注默认会选择骑手/商家快捷备注，并输入 ``test order``。
         """
+        self._takeout_order_submitted = False
+        raw = (checkout_payment or "balance").strip()
+        low = raw.lower()
+        if low in ("cod", "cash_on_delivery") or raw in (
+            "货到付款",
+            "货到",
+        ):
+            pay_mode = "cod"
+        else:
+            pay_mode = "balance"
+        if rounding_amount is not None and not rounding_payment:
+            raise AssertionError("--rounding-amount 需要显式 --rounding-payment")
+        if rounding_amount is not None:
+            try:
+                validated_rounding_amount = float(rounding_amount)
+            except (TypeError, ValueError) as exc:
+                raise AssertionError("取整金额必须为有限数字") from exc
+            if not math.isfinite(validated_rounding_amount):
+                raise AssertionError("取整金额必须为有限数字")
+        if rounding_payment and pay_mode != "cod":
+            raise AssertionError("取整支付仅支持 COD 货到付款")
+        payable_limit = None
+        if submit_order and max_payable is not None:
+            try:
+                payable_limit = float(max_payable)
+            except (TypeError, ValueError):
+                payable_limit = float("nan")
+            if not math.isfinite(payable_limit) or payable_limit <= 0:
+                raise AssertionError("真实提交缺少有限正数 --max-payable")
+
         logger.info("店铺详情：开始下单支付并取消流程…")
         cat = (category or "").strip() or "店内招牌"
         aliases = (
@@ -2774,15 +2815,6 @@ class TakeoutCheckoutMixin(TakeoutDeliveryTimeMixin, TakeoutCancelOrderMixin):
             rider_remark=rider_remark,
             merchant_remark=merchant_remark,
         )
-        raw = (checkout_payment or "balance").strip()
-        low = raw.lower()
-        if low in ("cod", "cash_on_delivery") or raw in (
-            "货到付款",
-            "货到",
-        ):
-            pay_mode = "cod"
-        else:
-            pay_mode = "balance"
         if pay_mode == "cod":
             if not self.shop_select_cash_on_delivery_payment():
                 logger.warning("货到付款未点到，请检查支付方式树")
@@ -2799,12 +2831,34 @@ class TakeoutCheckoutMixin(TakeoutDeliveryTimeMixin, TakeoutCancelOrderMixin):
             logger.error("未选到配送时段，终止支付流程")
             return False
         time.sleep(0.5)
+        effective_payable = None
+        if rounding_payment or payable_limit is not None:
+            effective_payable = self.checkout_payable_amount()
+        if rounding_payment:
+            selected_rounding = self.select_checkout_rounding_payment(
+                payable=effective_payable,
+                custom_amount=rounding_amount,
+            )
+            effective_payable = float(selected_rounding.amount)
         if not submit_order:
             logger.info("结算预览完成：未授权 --submit-order，停止在最终确认前")
             return True
+        if payable_limit is not None:
+            try:
+                payable = float(effective_payable)
+            except (TypeError, ValueError):
+                payable = float("nan")
+            if not math.isfinite(payable) or payable <= 0:
+                raise AssertionError("无法确认提交前的有限正数应付金额")
+            if payable > payable_limit:
+                raise AssertionError(
+                    "确认页实付 %.2f 超过 --max-payable %.2f"
+                    % (payable, payable_limit)
+                )
         if not self.shop_tap_confirm_pay_bar():
             logger.error("第二次「确认支付」未点到，终止支付流程")
             return False
+        self._takeout_order_submitted = True
         if pay_mode == "cod":
             time.sleep(1.0)
             logger.info("货到付款：跳过手动支付等待")

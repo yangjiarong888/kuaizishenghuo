@@ -2,18 +2,18 @@ from __future__ import annotations
 
 import pytest
 
-from scripts import run_takeout_wangwang as takeout_cli
+from scripts import run_takeout_wangwang as script
 
 
 def test_takeout_defaults_are_non_submitting() -> None:
-    args = takeout_cli.build_parser().parse_args([])
+    args = script.build_parser().parse_args([])
 
     assert args.checkout is False
     assert args.submit_order is False
 
 
 def test_takeout_cli_rejects_legacy_password_argument() -> None:
-    parser = takeout_cli.build_parser()
+    parser = script.build_parser()
 
     with pytest.raises(SystemExit) as exc_info:
         parser.parse_args(["--password", "do-not-accept-secrets"])
@@ -22,16 +22,80 @@ def test_takeout_cli_rejects_legacy_password_argument() -> None:
 
 
 def test_submit_order_requires_checkout() -> None:
-    args = takeout_cli.build_parser().parse_args(["--submit-order"])
+    args = script.build_parser().parse_args(["--submit-order"])
 
     with pytest.raises(ValueError, match="--checkout"):
-        takeout_cli.validate_args(args)
+        script.validate_args(args)
 
 
 def test_checkout_and_submit_order_is_an_explicit_valid_combination() -> None:
-    args = takeout_cli.build_parser().parse_args(["--checkout", "--submit-order"])
+    args = script.build_parser().parse_args(
+        ["--checkout", "--submit-order", "--max-payable", "500"]
+    )
 
-    takeout_cli.validate_args(args)
+    script.validate_args(args)
+
+
+def test_takeout_submit_requires_positive_max_payable(monkeypatch):
+    monkeypatch.setattr(
+        script.DriverManager,
+        "get_driver",
+        lambda *a, **k: pytest.fail("driver"),
+    )
+    assert script.main(["--checkout", "--submit-order"]) == 2
+
+
+def test_takeout_rounding_requires_cod(monkeypatch):
+    monkeypatch.setattr(
+        script.DriverManager,
+        "get_driver",
+        lambda *a, **k: pytest.fail("driver"),
+    )
+    assert script.main(["--checkout", "--rounding-payment", "--checkout-payment", "balance"]) == 2
+
+
+@pytest.mark.parametrize("value", ["nan", "inf", "-inf", "0", "-1"])
+def test_takeout_max_payable_must_be_finite_and_positive_before_driver(
+    monkeypatch, value
+) -> None:
+    monkeypatch.setattr(
+        script.DriverManager,
+        "get_driver",
+        lambda *a, **k: pytest.fail("driver"),
+    )
+
+    assert script.main([f"--max-payable={value}"]) == 2
+
+
+@pytest.mark.parametrize("value", ["nan", "inf", "-inf"])
+def test_takeout_rounding_amount_must_be_finite_before_driver(
+    monkeypatch, value
+) -> None:
+    monkeypatch.setattr(
+        script.DriverManager,
+        "get_driver",
+        lambda *a, **k: pytest.fail("driver"),
+    )
+
+    assert script.main(
+        [
+            "--checkout",
+            "--checkout-payment",
+            "cod",
+            "--rounding-payment",
+            f"--rounding-amount={value}",
+        ]
+    ) == 2
+
+
+def test_takeout_rounding_amount_requires_rounding_payment(monkeypatch) -> None:
+    monkeypatch.setattr(
+        script.DriverManager,
+        "get_driver",
+        lambda *a, **k: pytest.fail("driver"),
+    )
+
+    assert script.main(["--rounding-amount", "500"]) == 2
 
 
 def test_invalid_submit_combination_returns_two_before_driver_creation(
@@ -41,16 +105,16 @@ def test_invalid_submit_combination_returns_two_before_driver_creation(
         def __init__(self) -> None:
             raise AssertionError("DriverManager must not be created")
 
-    monkeypatch.setattr(takeout_cli, "DriverManager", ForbiddenManager)
+    monkeypatch.setattr(script, "DriverManager", ForbiddenManager)
 
-    assert takeout_cli.main(["--submit-order"]) == 2
+    assert script.main(["--submit-order"]) == 2
 
 
 @pytest.mark.parametrize(
     ("argv", "expected_submit_order"),
     [
         (["--checkout"], False),
-        (["--checkout", "--submit-order"], True),
+        (["--checkout", "--submit-order", "--max-payable", "500"], True),
     ],
 )
 def test_checkout_passes_explicit_submit_intent_to_page_flow(
@@ -74,13 +138,54 @@ def test_checkout_passes_explicit_submit_intent_to_page_flow(
             received_submit_intents.append(kwargs.get("submit_order"))
             return True
 
-    monkeypatch.setattr(takeout_cli, "DriverManager", FakeManager)
-    monkeypatch.setattr(takeout_cli, "TakeoutPageBase", FakeTakeoutPage)
+    monkeypatch.setattr(script, "DriverManager", FakeManager)
+    monkeypatch.setattr(script, "TakeoutPageBase", FakeTakeoutPage)
     monkeypatch.setattr(
-        takeout_cli,
+        script,
         "open_wangwang_supermarket_from_takeout_home",
         lambda *args, **kwargs: True,
     )
 
-    assert takeout_cli.main(argv) == 0
+    assert script.main(argv) == 0
     assert received_submit_intents == [expected_submit_order]
+
+
+def test_checkout_passes_rounding_and_cap_to_page_flow(monkeypatch) -> None:
+    received_kwargs = []
+    fake_driver = object()
+
+    class FakeManager:
+        def get_driver(self, *, session_name):
+            return fake_driver
+
+    class FakeTakeoutPage:
+        def __init__(self, driver):
+            assert driver is fake_driver
+
+        def run_shop_checkout_pay_and_cancel_flow(self, **kwargs):
+            received_kwargs.append(kwargs)
+            return True
+
+    monkeypatch.setattr(script, "DriverManager", FakeManager)
+    monkeypatch.setattr(script, "TakeoutPageBase", FakeTakeoutPage)
+    monkeypatch.setattr(
+        script,
+        "open_wangwang_supermarket_from_takeout_home",
+        lambda *args, **kwargs: True,
+    )
+
+    assert script.main(
+        [
+            "--checkout",
+            "--checkout-payment",
+            "cod",
+            "--rounding-payment",
+            "--rounding-amount",
+            "500",
+            "--max-payable",
+            "500",
+        ]
+    ) == 0
+    assert received_kwargs[0]["rounding_payment"] is True
+    assert received_kwargs[0]["rounding_amount"] == 500.0
+    assert received_kwargs[0]["max_payable"] == 500.0

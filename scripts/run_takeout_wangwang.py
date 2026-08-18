@@ -33,6 +33,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import sys
 from pathlib import Path
@@ -118,6 +119,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="结账支付方式：balance 余额（默认）；cod 货到付款（不输入支付密码）。",
     )
     parser.add_argument(
+        "--rounding-payment",
+        action="store_true",
+        help="在结算页显式选择货到付款取整金额",
+    )
+    parser.add_argument(
+        "--rounding-amount",
+        type=float,
+        default=None,
+        help="自定义有限货到付款取整金额；必须同时传 --rounding-payment",
+    )
+    parser.add_argument(
+        "--max-payable",
+        type=float,
+        default=None,
+        help="本次允许提交的有限正数最大实付金额；真实下单必须显式提供",
+    )
+    parser.add_argument(
         "--coupon-policy",
         choices=("auto", "skip", "require"),
         default="auto",
@@ -172,6 +190,18 @@ def build_parser() -> argparse.ArgumentParser:
 def validate_args(args: argparse.Namespace) -> None:
     if args.submit_order and not args.checkout:
         raise ValueError("--submit-order requires --checkout")
+    if args.submit_order and (args.max_payable is None or args.max_payable <= 0):
+        raise ValueError("real takeout order requires positive --max-payable")
+    if args.max_payable is not None and (
+        not math.isfinite(args.max_payable) or args.max_payable <= 0
+    ):
+        raise ValueError("--max-payable must be finite and positive")
+    if args.rounding_amount is not None and not args.rounding_payment:
+        raise ValueError("--rounding-amount requires --rounding-payment")
+    if args.rounding_amount is not None and not math.isfinite(args.rounding_amount):
+        raise ValueError("--rounding-amount must be finite")
+    if args.rounding_payment and args.checkout_payment != "cod":
+        raise ValueError("takeout rounding requires COD")
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -218,6 +248,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             delivery_time_slot_ordinal=args.delivery_time_slot_ordinal,
             delivery_slot_contains=args.delivery_slot_contains,
             checkout_payment=args.checkout_payment,
+            rounding_payment=args.rounding_payment,
+            rounding_amount=args.rounding_amount,
+            max_payable=args.max_payable,
             coupon_policy=args.coupon_policy,
             pickup_code=args.pickup_code,
             notify_method=args.notify_method,
