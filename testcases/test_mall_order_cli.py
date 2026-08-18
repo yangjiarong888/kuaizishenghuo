@@ -56,3 +56,20 @@ def test_main_rejects_unsafe_address_action_before_driver_creation(monkeypatch):
     monkeypatch.setattr(mall_cli, "DriverManager", UnexpectedDriverManager)
 
     assert mall_cli.main(["--add-test-address-only"]) == 2
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["--rounding-amount", "500"],
+        ["--rounding-payment", "--payment-method", "wechat_mock"],
+    ],
+)
+def test_rounding_invalid_combinations_return_two_before_driver(argv, monkeypatch):
+    monkeypatch.setattr(
+        mall_cli.DriverManager,
+        "get_driver",
+        lambda *args, **kwargs: pytest.fail("driver must not be created"),
+    )
+
+    assert mall_cli.main(argv) == 2

@@ -61,6 +61,7 @@ from flows.mall_order_types import (
 from pages.mall_order_address_mixin import MallOrderAddressMixin
 from pages.mall_order_cart_mixin import MallOrderCartMixin
 from pages.mall_order_checkout_mixin import MallOrderCheckoutMixin
+from pages.rounding_payment import RoundingPaymentMixin
 from pages.shop_business_page import ShopBusinessPage
 from pages.shop_locators import (
     SHOP_ID_COUNT_ADD,
@@ -107,6 +108,7 @@ class MallOrderFlow(
     MallOrderAddressMixin,
     MallOrderCartMixin,
     MallOrderCheckoutMixin,
+    RoundingPaymentMixin,
     ShopBusinessPage,
 ):
     """基于现有 ShopBusinessPage 补齐下单场景断言。"""
@@ -127,6 +129,8 @@ class MallOrderFlow(
         mock_pay_success_url: Optional[str],
         skip_stock_assert: bool,
         payment_method: str,
+        rounding_payment: bool,
+        rounding_amount: Optional[float],
         min_order_amount: float,
         max_payable: Optional[float],
         cancel_after_order: bool,
@@ -162,6 +166,8 @@ class MallOrderFlow(
         self.mock_pay_success_url = mock_pay_success_url
         self.skip_stock_assert = skip_stock_assert
         self.payment_method = (payment_method or "cod").strip().lower()
+        self.rounding_payment = bool(rounding_payment)
+        self.rounding_amount = rounding_amount
         self.min_order_amount = float(min_order_amount or 0.0)
         self.max_payable = max_payable
         self.cancel_after_order = cancel_after_order
@@ -899,6 +905,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="支付方式：cod 货到付款；wechat_mock 微信支付并使用支付成功测试钩子/模拟按钮",
     )
     parser.add_argument(
+        "--rounding-payment",
+        action="store_true",
+        help="在确认订单页显式选择货到付款取整金额",
+    )
+    parser.add_argument(
+        "--rounding-amount",
+        type=float,
+        default=None,
+        help="自定义货到付款取整金额；必须同时传 --rounding-payment",
+    )
+    parser.add_argument(
         "--submit-order",
         action="store_true",
         help="真正点击提交订单，并继续收银台/货到付款或模拟支付/订单状态/库存扣减/IM 断言",
@@ -997,6 +1014,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 def validate_args(args) -> None:
     """Reject unsafe or contradictory mall capabilities before Driver creation."""
+    if args.rounding_amount is not None and not args.rounding_payment:
+        raise ValueError("--rounding-amount requires --rounding-payment")
+    if args.rounding_payment and args.payment_method != "cod":
+        raise ValueError("COD rounding requires --payment-method cod")
+
     address_mutation = any(
         (
             args.ensure_test_address,
@@ -1122,6 +1144,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         mock_pay_success_url=args.mock_pay_success_url,
         skip_stock_assert=args.skip_stock_assert,
         payment_method=args.payment_method,
+        rounding_payment=args.rounding_payment,
+        rounding_amount=args.rounding_amount,
         min_order_amount=args.min_order_amount,
         max_payable=args.max_payable,
         cancel_after_order=args.cancel_created_order,

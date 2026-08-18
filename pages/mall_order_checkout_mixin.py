@@ -903,6 +903,42 @@ class MallOrderCheckoutMixin:
             logger.warning("订单详情页未找到复制订单号控件，使用已解析订单号继续发送 IM")
         return order_no
 
+    def assert_order_detail_rounding_change(
+        self,
+        submit: SubmitResult,
+        expected_change: float,
+    ) -> None:
+        self.ensure_order_detail_page()
+        detail_order_no = self.extract_order_no(self.page_blob())
+        if not detail_order_no:
+            raise AssertionError("订单详情页未解析到本次订单号，无法校验取整找零")
+        if detail_order_no != submit.order_no:
+            raise AssertionError(
+                "订单详情订单号与本次提交不一致：%s != %s"
+                % (detail_order_no, submit.order_no)
+            )
+
+        texts = self.page_texts()
+        change_values = []
+        for index, text in enumerate(texts):
+            if not any(marker in text for marker in ("找零", "找回", "存入余额")):
+                continue
+            for candidate in texts[index : index + 2]:
+                value = parse_money(candidate)
+                if value is not None and value not in change_values:
+                    change_values.append(value)
+        expected = round(float(expected_change), 2)
+        if len(change_values) != 1 or round(change_values[0], 2) != expected:
+            raise AssertionError(
+                "订单详情取整找零不正确：expected %.2f, actual %s"
+                % (expected, change_values or "未解析")
+            )
+        logger.info(
+            "本次订单详情取整找零校验通过：order_no=%s change=%.2f",
+            submit.order_no,
+            expected,
+        )
+
     def open_im_from_order_detail(self) -> None:
         self.ensure_order_detail_page()
         if not self.click_labels(
@@ -1017,6 +1053,18 @@ class MallOrderCheckoutMixin:
         selected_slot = self.pick_tomorrow_random_preorder_time_if_needed()
         if selected_slot:
             amounts = self.read_amounts(product)
+        selected_rounding = None
+        if getattr(self, "rounding_payment", False):
+            selected_rounding = self.select_checkout_rounding_payment(
+                payable=amounts.payable,
+                custom_amount=getattr(self, "rounding_amount", None),
+            )
+            amounts = AmountSnapshot(
+                goods_total=amounts.goods_total,
+                coupon=amounts.coupon,
+                freight=amounts.freight,
+                payable=float(selected_rounding.amount),
+            )
         if not submit_order:
             logger.info(
                 "未传 --submit-order：停在确认订单页，跳过真实提交和支付"
@@ -1025,6 +1073,11 @@ class MallOrderCheckoutMixin:
         self.assert_within_payable_limit(amounts)
         submit = self.submit_order(amounts)
         self.pay_and_assert(submit, product)
+        if selected_rounding is not None:
+            self.assert_order_detail_rounding_change(
+                submit,
+                selected_rounding.change,
+            )
         if self.send_im_after_order:
             self.send_order_cancel_im_if_needed(submit)
         if self.cancel_after_order:
