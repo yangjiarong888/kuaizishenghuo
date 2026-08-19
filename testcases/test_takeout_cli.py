@@ -30,10 +30,80 @@ def test_submit_order_requires_checkout() -> None:
 
 def test_checkout_and_submit_order_is_an_explicit_valid_combination() -> None:
     args = script.build_parser().parse_args(
-        ["--checkout", "--submit-order", "--max-payable", "500"]
+        [
+            "--checkout",
+            "--submit-order",
+            "--max-payable",
+            "500",
+            "--address-ordinal",
+            "1",
+            "--delivery-time-slot-ordinal",
+            "1",
+        ]
     )
 
     script.validate_args(args)
+
+
+def test_takeout_submit_requires_an_explicit_address_ordinal() -> None:
+    args = script.build_parser().parse_args(
+        [
+            "--checkout",
+            "--submit-order",
+            "--max-payable",
+            "500",
+            "--delivery-time-slot-ordinal",
+            "1",
+        ]
+    )
+
+    with pytest.raises(ValueError, match="address-ordinal"):
+        script.validate_args(args)
+
+
+def test_takeout_rejects_non_positive_address_ordinal() -> None:
+    args = script.build_parser().parse_args(
+        [
+            "--checkout",
+            "--address-ordinal",
+            "0",
+        ]
+    )
+
+    with pytest.raises(ValueError, match="address-ordinal"):
+        script.validate_args(args)
+
+
+def test_takeout_submit_requires_an_explicit_delivery_slot() -> None:
+    args = script.build_parser().parse_args(
+        [
+            "--checkout",
+            "--submit-order",
+            "--max-payable",
+            "500",
+            "--address-ordinal",
+            "1",
+        ]
+    )
+
+    with pytest.raises(ValueError, match="delivery"):
+        script.validate_args(args)
+
+
+def test_takeout_rejects_non_positive_delivery_ordinal() -> None:
+    args = script.build_parser().parse_args(
+        ["--checkout", "--delivery-time-slot-ordinal", "0"]
+    )
+
+    with pytest.raises(ValueError, match="delivery-time-slot-ordinal"):
+        script.validate_args(args)
+
+
+def test_takeout_keeps_the_explicit_default_free_text_remark() -> None:
+    args = script.build_parser().parse_args([])
+
+    assert args.remark_text == "test order"
+    assert args.merchant_remark == ""
 
 
 def test_takeout_submit_requires_positive_max_payable(monkeypatch):
@@ -126,9 +196,15 @@ def test_checkout_passes_explicit_submit_intent_to_page_flow(
     fake_driver = object()
 
     class FakeManager:
+        def __init__(self):
+            self.closed = []
+
         def get_driver(self, *, session_name):
             assert session_name == "takeout_wangwang"
             return fake_driver
+
+        def close_driver(self, *, session_name):
+            self.closed.append(session_name)
 
     class FakeTakeoutPage:
         def __init__(self, driver):
@@ -146,6 +222,15 @@ def test_checkout_passes_explicit_submit_intent_to_page_flow(
         lambda *args, **kwargs: True,
     )
 
+    if expected_submit_order:
+        argv.extend(
+            [
+                "--address-ordinal",
+                "1",
+                "--delivery-time-slot-ordinal",
+                "1",
+            ]
+        )
     assert script.main(argv) == 0
     assert received_submit_intents == [expected_submit_order]
 
@@ -155,8 +240,14 @@ def test_checkout_passes_rounding_and_cap_to_page_flow(monkeypatch) -> None:
     fake_driver = object()
 
     class FakeManager:
+        def __init__(self):
+            self.closed = []
+
         def get_driver(self, *, session_name):
             return fake_driver
+
+        def close_driver(self, *, session_name):
+            self.closed.append(session_name)
 
     class FakeTakeoutPage:
         def __init__(self, driver):
@@ -189,3 +280,34 @@ def test_checkout_passes_rounding_and_cap_to_page_flow(monkeypatch) -> None:
     assert received_kwargs[0]["rounding_payment"] is True
     assert received_kwargs[0]["rounding_amount"] == 500.0
     assert received_kwargs[0]["max_payable"] == 500.0
+
+
+def test_takeout_main_always_closes_driver_after_flow_failure(monkeypatch) -> None:
+    calls = []
+    fake_driver = object()
+
+    class FakeManager:
+        def get_driver(self, *, session_name):
+            calls.append(("get", session_name))
+            return fake_driver
+
+        def close_driver(self, *, session_name):
+            calls.append(("close", session_name))
+
+    class FailingPage:
+        def __init__(self, driver):
+            assert driver is fake_driver
+
+        def run_shop_checkout_pay_and_cancel_flow(self, **kwargs):
+            raise AssertionError("checkout failed")
+
+    monkeypatch.setattr(script, "DriverManager", FakeManager)
+    monkeypatch.setattr(script, "TakeoutPageBase", FailingPage)
+    monkeypatch.setattr(
+        script,
+        "open_wangwang_supermarket_from_takeout_home",
+        lambda *args, **kwargs: True,
+    )
+
+    assert script.main(["--checkout"]) == 1
+    assert calls[-1] == ("close", "takeout_wangwang")

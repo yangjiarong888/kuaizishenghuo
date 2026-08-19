@@ -11,7 +11,7 @@
   python scripts/run_takeout_wangwang.py --session my_session
   python scripts/run_takeout_wangwang.py --no-manila
   python scripts/run_takeout_wangwang.py --checkout
-  python scripts/run_takeout_wangwang.py --checkout --submit-order
+  python scripts/run_takeout_wangwang.py --checkout --submit-order --max-payable 5000 --address-ordinal 1 --delivery-time-slot-ordinal 1
   python scripts/run_takeout_wangwang.py --checkout --category "健康粮油"
   python scripts/run_takeout_wangwang.py --checkout --delivery-time-slot-ordinal 5
   python scripts/run_takeout_wangwang.py --checkout --delivery-slot-contains 01:40
@@ -113,6 +113,21 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--address-ordinal",
+        type=int,
+        default=None,
+        metavar="N",
+        help="真实下单时必填：选择当前已有地址列表自上而下第 N 条（1 起算）。",
+    )
+    parser.add_argument(
+        "--address-contains",
+        default=None,
+        metavar="TEXT",
+        help=(
+            "可选地址二次校验：第 N 条地址必须包含该姓名、电话尾号或地址摘要。"
+        ),
+    )
+    parser.add_argument(
         "--checkout-payment",
         choices=("balance", "cod"),
         default="balance",
@@ -192,6 +207,22 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("--submit-order requires --checkout")
     if args.submit_order and (args.max_payable is None or args.max_payable <= 0):
         raise ValueError("real takeout order requires positive --max-payable")
+    if args.submit_order and args.address_ordinal is None:
+        raise ValueError("real takeout order requires --address-ordinal")
+    if args.address_ordinal is not None and args.address_ordinal < 1:
+        raise ValueError("--address-ordinal must be >= 1")
+    if (
+        args.delivery_time_slot_ordinal is not None
+        and args.delivery_time_slot_ordinal < 1
+    ):
+        raise ValueError("--delivery-time-slot-ordinal must be >= 1")
+    if args.submit_order and not (
+        args.delivery_time_slot_ordinal is not None
+        or (args.delivery_slot_contains or "").strip()
+    ):
+        raise ValueError(
+            "real takeout order requires explicit delivery slot selection"
+        )
     if args.max_payable is not None and (
         not math.isfinite(args.max_payable) or args.max_payable <= 0
     ):
@@ -228,36 +259,54 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if _sm == "activate":
         logger.info("将在前台继续当前 App；若不在外卖列表页，会自动点击底栏「外卖」")
     logger.info("获取驱动 session=%s …", args.session)
-    driver = DriverManager().get_driver(session_name=args.session)
-    ok = open_wangwang_supermarket_from_takeout_home(
-        driver,
-        shop_name=args.shop,
-        ensure_manila_city=not args.no_manila,
-    )
-    if ok and not args.checkout:
-        logger.info(
-            "未加 --checkout：进店流程已完成，已跳过店内加购/结账演示。"
-            " 完整下单请加：python scripts/run_takeout_wangwang.py --checkout …"
+    manager = DriverManager()
+    driver = None
+    ok = False
+    try:
+        driver = manager.get_driver(session_name=args.session)
+        ok = open_wangwang_supermarket_from_takeout_home(
+            driver,
+            shop_name=args.shop,
+            ensure_manila_city=not args.no_manila,
         )
-    if ok and args.checkout:
-        page = TakeoutPageBase(driver)
-        ok = page.run_shop_checkout_pay_and_cancel_flow(
-            submit_order=args.submit_order,
-            category=args.category,
-            category_aliases=args.category_alias or None,
-            delivery_time_slot_ordinal=args.delivery_time_slot_ordinal,
-            delivery_slot_contains=args.delivery_slot_contains,
-            checkout_payment=args.checkout_payment,
-            rounding_payment=args.rounding_payment,
-            rounding_amount=args.rounding_amount,
-            max_payable=args.max_payable,
-            coupon_policy=args.coupon_policy,
-            pickup_code=args.pickup_code,
-            notify_method=args.notify_method,
-            remark_text=args.remark_text,
-            rider_remark=args.rider_remark,
-            merchant_remark=args.merchant_remark,
-        )
+        if ok and not args.checkout:
+            logger.info(
+                "未加 --checkout：进店流程已完成，已跳过店内加购/结账演示。"
+                " 完整下单请加：python scripts/run_takeout_wangwang.py --checkout …"
+            )
+        if ok and args.checkout:
+            page = TakeoutPageBase(driver)
+            ok = page.run_shop_checkout_pay_and_cancel_flow(
+                submit_order=args.submit_order,
+                category=args.category,
+                category_aliases=args.category_alias or None,
+                delivery_time_slot_ordinal=args.delivery_time_slot_ordinal,
+                delivery_slot_contains=args.delivery_slot_contains,
+                address_ordinal=args.address_ordinal,
+                address_contains=args.address_contains,
+                checkout_payment=args.checkout_payment,
+                rounding_payment=args.rounding_payment,
+                rounding_amount=args.rounding_amount,
+                max_payable=args.max_payable,
+                coupon_policy=args.coupon_policy,
+                pickup_code=args.pickup_code,
+                notify_method=args.notify_method,
+                remark_text=args.remark_text,
+                rider_remark=args.rider_remark,
+                merchant_remark=args.merchant_remark,
+            )
+    except AssertionError as exc:
+        logger.error("外卖下单脚本断言失败：%s", exc)
+        ok = False
+    except Exception as exc:
+        logger.error("外卖下单脚本异常：%s", type(exc).__name__)
+        ok = False
+    finally:
+        if driver is not None:
+            try:
+                manager.close_driver(session_name=args.session)
+            except Exception as exc:
+                logger.warning("close_driver 失败: %s", type(exc).__name__)
     if ok:
         completed = ""
         if args.checkout:

@@ -419,6 +419,29 @@ class TakeoutPageBase(TakeoutShopMixin):
         )
         return any(n in src for n in needles)
 
+    def _dismiss_location_permission_prompt_if_present(self) -> bool:
+        """Dismiss the in-app location prompt without changing OS permissions."""
+        try:
+            src = self.driver.page_source or ""
+        except Exception:
+            return False
+        if "定位权限未开启" not in src:
+            return False
+        for pkg in _PACKAGES:
+            try:
+                for element in self.driver.find_elements(
+                    AppiumBy.ID, f"{pkg}:id/tv_cancel"
+                ):
+                    if element.is_displayed():
+                        element.click()
+                        logger.info("已取消定位权限提示，继续使用手动城市选择")
+                        time.sleep(0.6)
+                        return True
+            except Exception:
+                continue
+        logger.error("定位权限提示可见，但未找到安全取消按钮")
+        return False
+
     def _click_manila_hot_city(self) -> bool:
         """「切换热门城市」里点马尼拉。"""
         for pkg in _PACKAGES:
@@ -534,6 +557,7 @@ class TakeoutPageBase(TakeoutShopMixin):
             return False
 
         time.sleep(0.9)
+        self._dismiss_location_permission_prompt_if_present()
         if not self._address_selection_screen_visible():
             time.sleep(1.2)
 
@@ -557,11 +581,10 @@ class TakeoutPageBase(TakeoutShopMixin):
 
         if self.location_header_shows_manila():
             logger.info("外卖顶栏已显示马尼拉")
+            return True
         else:
-            logger.warning(
-                "未从顶栏文案确认马尼拉；若列表已有菲方店铺可忽略本警告"
-            )
-        return True
+            logger.error("未从顶栏文案确认马尼拉")
+            return False
 
     def _uia_scroll_into_view(
         self,
@@ -1076,7 +1099,8 @@ def open_wangwang_supermarket_from_takeout_home(
     """可选先马尼拉定位，再进店 shop_name。"""
     page = TakeoutPageBase(driver)
     if ensure_manila_city and not page.ensure_takeout_city_manila():
-        logger.warning("马尼拉定位流程告警，仍尝试找店…")
+        logger.error("马尼拉定位未确认，终止找店")
+        return False
     if not page.ensure_takeout_tab():
         return False
     page.wait_merchant_list_present(timeout=15.0)

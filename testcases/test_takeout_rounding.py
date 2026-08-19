@@ -51,12 +51,19 @@ class FakeTakeoutCheckout(TakeoutCheckoutMixin):
         self.events.append("address")
         return True
 
+    def shop_pick_address_in_sheet(
+        self, *, address_ordinal, address_contains=None
+    ):
+        self.events.append(f"address:{address_ordinal}")
+        return True
+
     def shop_apply_checkout_coupons(self, **kwargs):
         self.events.append("coupons")
         return True
 
     def shop_apply_checkout_preferences(self, **kwargs):
         self.events.append("preferences")
+        return True
 
     def shop_select_balance_payment(self):
         self.events.append("balance")
@@ -101,6 +108,8 @@ def test_takeout_cod_rounding_is_selected_before_submit():
         rounding_payment=True,
         rounding_amount=500,
         max_payable=500,
+        address_ordinal=1,
+        delivery_time_slot_ordinal=1,
     ) is False
     assert page.events.index("rounding:500") < page.events.index("submit")
     assert page._takeout_order_submitted is True
@@ -114,6 +123,7 @@ def test_takeout_cod_rounding_follows_payment_and_delivery_selection():
         checkout_payment="cod",
         rounding_payment=True,
         rounding_amount=500,
+        address_ordinal=1,
     )
 
     assert page.events.index("cod") < page.events.index("delivery")
@@ -125,6 +135,7 @@ def test_takeout_balance_never_calls_rounding_or_password_input():
     page.run_shop_checkout_pay_and_cancel_flow(
         submit_order=False,
         checkout_payment="balance",
+        address_ordinal=1,
     )
     assert not any(event.startswith("rounding") for event in page.events)
     assert not hasattr(page, "shop_enter_pay_password")
@@ -140,6 +151,8 @@ def test_takeout_rounded_amount_above_limit_stops_before_submit():
             rounding_payment=True,
             rounding_amount=500,
             max_payable=499,
+            address_ordinal=1,
+            delivery_time_slot_ordinal=1,
         )
 
     assert "submit" not in page.events
@@ -179,6 +192,8 @@ def test_takeout_required_cod_selection_failure_stops_before_later_checkout(
         rounding_payment=rounding_payment,
         rounding_amount=500 if rounding_payment else None,
         max_payable=500 if submit_order else None,
+        address_ordinal=1,
+        delivery_time_slot_ordinal=1 if submit_order else None,
     ) is False
 
     assert page.events[-1] == "cod"

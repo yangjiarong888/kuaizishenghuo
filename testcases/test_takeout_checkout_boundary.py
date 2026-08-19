@@ -4,10 +4,20 @@ from pages.takeout_checkout_mixin import TakeoutCheckoutMixin
 
 
 class RecordingCheckout(TakeoutCheckoutMixin):
-    def __init__(self, *, manual_payment_ok: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        manual_payment_ok: bool = True,
+        preferences_ok: bool = True,
+        payable_values=None,
+        address_ok: bool = True,
+    ) -> None:
         self.events = []
         self.confirm_count = 0
         self.manual_payment_ok = manual_payment_ok
+        self.preferences_ok = preferences_ok
+        self.payable_values = list(payable_values or [100.0])
+        self.address_ok = address_ok
 
     def shop_detail_scroll_to_category(self, *args, **kwargs):
         self.events.append("category")
@@ -34,13 +44,19 @@ class RecordingCheckout(TakeoutCheckoutMixin):
         self.events.append("address")
         return True
 
+    def shop_pick_address_in_sheet(
+        self, *, address_ordinal, address_contains=None
+    ):
+        self.events.append(("address", address_ordinal, address_contains))
+        return self.address_ok
+
     def shop_apply_checkout_coupons(self, **kwargs):
         self.events.append("coupons")
         return True
 
     def shop_apply_checkout_preferences(self, **kwargs):
         self.events.append("preferences")
-        return True
+        return self.preferences_ok
 
     def shop_select_balance_payment(self):
         self.events.append("balance")
@@ -55,7 +71,9 @@ class RecordingCheckout(TakeoutCheckoutMixin):
         return True
 
     def checkout_payable_amount(self):
-        return 100.0
+        value = self.payable_values.pop(0)
+        self.events.append(("payable", value))
+        return value
 
     def shop_enter_pay_password(self, password="legacy-default"):
         self.events.append(("auto-password", password))
@@ -78,7 +96,10 @@ def test_preview_stops_before_final_confirmation(monkeypatch) -> None:
     monkeypatch.setattr("pages.takeout_checkout_mixin.time.sleep", lambda _: None)
     page = RecordingCheckout()
 
-    assert page.run_shop_checkout_pay_and_cancel_flow(submit_order=False)
+    assert page.run_shop_checkout_pay_and_cancel_flow(
+        submit_order=False,
+        address_ordinal=1,
+    )
 
     assert page.confirm_count == 1
     assert "cancel" not in page.events
@@ -100,6 +121,8 @@ def test_balance_submission_waits_for_manual_payment_then_cancels(
         checkout_payment="balance",
         manual_payment_timeout=90.0,
         max_payable=500,
+        address_ordinal=1,
+        delivery_time_slot_ordinal=1,
     )
 
     assert page.confirm_count == 2
@@ -119,6 +142,8 @@ def test_cod_submission_skips_manual_payment(monkeypatch) -> None:
         submit_order=True,
         checkout_payment="cod",
         max_payable=500,
+        address_ordinal=1,
+        delivery_time_slot_ordinal=1,
     )
 
     assert page.confirm_count == 2
@@ -139,7 +164,94 @@ def test_manual_payment_timeout_stops_before_cancel(monkeypatch) -> None:
         checkout_payment="balance",
         manual_payment_timeout=30.0,
         max_payable=500,
+        address_ordinal=1,
+        delivery_time_slot_ordinal=1,
     )
 
     assert ("manual-payment", 30.0) in page.events
     assert "cancel" not in page.events
+
+
+def test_submit_uses_the_explicit_address_match(monkeypatch) -> None:
+    monkeypatch.setattr("pages.takeout_checkout_mixin.time.sleep", lambda _: None)
+    page = RecordingCheckout()
+
+    assert page.run_shop_checkout_pay_and_cancel_flow(
+        submit_order=True,
+        checkout_payment="cod",
+        max_payable=500,
+        address_ordinal=1,
+        address_contains="70994",
+        delivery_time_slot_ordinal=1,
+    )
+
+    assert ("address", 1, "70994") in page.events
+    assert "address" not in page.events
+
+
+def test_payment_sheet_is_resolved_before_checkout_preferences(monkeypatch) -> None:
+    monkeypatch.setattr("pages.takeout_checkout_mixin.time.sleep", lambda _: None)
+    page = RecordingCheckout()
+
+    assert page.run_shop_checkout_pay_and_cancel_flow(
+        submit_order=True,
+        checkout_payment="cod",
+        max_payable=500,
+        address_ordinal=1,
+        delivery_time_slot_ordinal=1,
+    )
+
+    address_event = ("address", 1, None)
+    assert page.events.index(address_event) < page.events.index("cod")
+    assert page.events.index("cod") < page.events.index("coupons")
+    assert page.events.index("cod") < page.events.index("preferences")
+
+
+def test_checkout_stops_when_requested_preferences_cannot_be_applied(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr("pages.takeout_checkout_mixin.time.sleep", lambda _: None)
+    page = RecordingCheckout(preferences_ok=False)
+
+    assert not page.run_shop_checkout_pay_and_cancel_flow(
+        submit_order=True,
+        checkout_payment="cod",
+        max_payable=500,
+        address_ordinal=1,
+        delivery_time_slot_ordinal=1,
+    )
+
+    assert page.events.index("cod") < page.events.index("preferences")
+    assert "confirm-2" not in page.events
+
+
+def test_submit_retries_a_transiently_missing_payable_amount(monkeypatch) -> None:
+    monkeypatch.setattr("pages.takeout_checkout_mixin.time.sleep", lambda _: None)
+    page = RecordingCheckout(payable_values=[None, 1094.0])
+
+    assert page.run_shop_checkout_pay_and_cancel_flow(
+        submit_order=True,
+        checkout_payment="cod",
+        max_payable=5000,
+        address_ordinal=1,
+        delivery_time_slot_ordinal=1,
+    )
+
+    assert ("payable", None) in page.events
+    assert ("payable", 1094.0) in page.events
+
+
+def test_address_match_failure_is_not_retried(monkeypatch) -> None:
+    monkeypatch.setattr("pages.takeout_checkout_mixin.time.sleep", lambda _: None)
+    page = RecordingCheckout(address_ok=False)
+
+    assert not page.run_shop_checkout_pay_and_cancel_flow(
+        submit_order=True,
+        checkout_payment="cod",
+        max_payable=5000,
+        address_ordinal=1,
+        address_contains="app 09621170994",
+        delivery_time_slot_ordinal=1,
+    )
+
+    assert page.events.count(("address", 1, "app 09621170994")) == 1

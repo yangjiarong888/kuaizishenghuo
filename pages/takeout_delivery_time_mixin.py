@@ -1,7 +1,6 @@
 """店铺详情下单流程（TakeoutPageBase 混入）。"""
 from __future__ import annotations
 
-import random
 import re
 import time
 from contextlib import nullcontext
@@ -484,19 +483,22 @@ class TakeoutDeliveryTimeMixin:
                         narrowed.append(el)
                 except Exception:
                     continue
-            if narrowed:
-                pool = narrowed
+            if not narrowed:
+                return None, f"未找到含「{hint}」的时段"
+            pool = narrowed
         ordered = self._order_delivery_time_slots_top_down(pool)
         if not ordered:
             return None, ""
-        if slot_ordinal_1based is not None and slot_ordinal_1based >= 1:
+        if slot_ordinal_1based is not None and slot_ordinal_1based < 1:
+            return None, "配送时段序号必须从 1 开始"
+        if slot_ordinal_1based is not None:
             idx = slot_ordinal_1based - 1
             if idx >= len(ordered):
                 return None, f"__scroll_for_ordinal__:{len(ordered)}"
             return ordered[idx], f"第{slot_ordinal_1based}项（行数={len(ordered)}）"
         if hint:
             return ordered[0], f"含「{hint}」首条"
-        return random.choice(ordered), "随机"
+        return ordered[0], "首条"
     
 
     def _tap_checkout_delivery_row_coordinate_fallback(self, w: int, h: int) -> None:
@@ -532,7 +534,7 @@ class TakeoutDeliveryTimeMixin:
         ``preferred_slot_contains``：如 ``\"01:40\"``，在候选里筛含该子串的节点。
         ``delivery_time_slot_ordinal``：1 起算，在 **自上而下、按行去重** 的时段列表里点第 N 个
         （例：``5`` = 第五个选项）；与 ``preferred_slot_contains`` 可同时用（先筛再取序数）。
-        两者都不传时仍 **随机** 选一个时段。
+        两者都不传时确定性选择可见首个时段；真实提交由上层要求显式指定其一。
         """
         w, h = self._window_size_safe()
         opened = False
@@ -559,21 +561,15 @@ class TakeoutDeliveryTimeMixin:
             ):
                 opened = True
                 logger.info("坐标兜底后已唤起配送/预约时段弹层")
+        if not opened:
+            logger.error("未确认配送时段弹层已打开，终止选择")
+            return False
         time.sleep(1.0)
         list_x = int(w * 0.72)
         with self._maybe_zero_implicit_wait():
             if not self._tap_day_after_tomorrow_date_in_sheet():
-                for label in ("明天", "今天"):
-                    if self._tap_first_displayed(
-                        AppiumBy.XPATH,
-                        f'//*[contains(@content-desc,"{label}")]',
-                    ) or self._tap_first_displayed(
-                        AppiumBy.XPATH,
-                        f'//*[contains(@text,"{label}")]',
-                    ):
-                        logger.info("已选日期「%s」（兜底）", label)
-                        time.sleep(0.65)
-                        break
+                logger.error("未确认后天日期，禁止降级选择明天/今天")
+                return False
     
             for attempt in range(8):
                 slots: List = []

@@ -301,7 +301,7 @@ class TakeoutCancelOrderMixin:
         except Exception:
             pass
         # Appium 元素定位偶发拿不到 Flutter 语义节点时，从 page_source 的 bounds
-        # 直接解析「提交」主按钮。实测取消原因弹层的提交按钮在 0.70h~0.78h。
+        # 直接解析「提交」主按钮。不同状态栏坐标系下按钮中心约在 0.66h~0.78h。
         try:
             src = self.driver.page_source or ""
             bounds_hits: List[Tuple[int, int, int, int]] = []
@@ -334,6 +334,9 @@ class TakeoutCancelOrderMixin:
             pass
         # 坐标兜底：按取消原因弹层实际主按钮高度点，避免点到弹层下方。
         for xf, yf in (
+            (0.50, 0.66),
+            (0.48, 0.66),
+            (0.52, 0.66),
             (0.50, 0.73),
             (0.50, 0.745),
             (0.50, 0.76),
@@ -346,7 +349,7 @@ class TakeoutCancelOrderMixin:
             cx, cy = int(w * xf), int(h * yf)
             if not (int(w * 0.28) <= cx <= int(w * 0.72)):
                 continue
-            if not (int(h * 0.68) <= cy <= int(h * 0.84)):
+            if not (int(h * 0.62) <= cy <= int(h * 0.84)):
                 continue
             try:
                 self.driver.execute_script(
@@ -675,6 +678,7 @@ class TakeoutCancelOrderMixin:
             # 与常见「取消订单」弹窗 7 项列表一致：第 3 项「收货信息填错了」约在屏高中部略上
             if "收货信息" in reason or "填错" in reason:
                 row_y = (
+                    0.413,
                     0.48,
                     0.50,
                     0.52,

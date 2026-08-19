@@ -31,7 +31,7 @@ from pages.takeout_locators import (
 logger = setup_logger(__name__)
 
 DEFAULT_RIDER_REMARK = "请把餐品放到大楼前台 Please place the meal at the reception desk"
-DEFAULT_MERCHANT_REMARK = "如缺货，直接取消订单 Any product no stock, cancel order"
+DEFAULT_MERCHANT_REMARK = ""
 DEFAULT_REMARK_TEXT = "test order"
 
 
@@ -2383,20 +2383,84 @@ class TakeoutCheckoutMixin(
         out.sort(key=lambda item: item[0])
         return [el for _, el in out]
 
-    def _type_checkout_text(self, text: str, desc: str) -> bool:
-        for el in self._visible_edit_texts_checkout():
-            try:
-                el.click()
-                time.sleep(0.15)
+    def _type_checkout_text(
+        self,
+        text: str,
+        desc: str,
+        *,
+        section_label: Optional[str] = None,
+    ) -> bool:
+        if not section_label:
+            for el in self._visible_edit_texts_checkout():
                 try:
-                    el.clear()
+                    el.click()
+                    time.sleep(0.15)
+                    try:
+                        el.clear()
+                    except Exception:
+                        pass
+                    el.send_keys(text)
+                    logger.info("已输入%s：%s", desc, text)
+                    return True
                 except Exception:
-                    pass
-                el.send_keys(text)
-                logger.info("已输入%s：%s", desc, text)
-                return True
+                    continue
+        # Flutter 备注输入区在未聚焦时只暴露为带 hint 的语义 View，
+        # 不会出现在 android.widget.EditText 查询结果中。
+        safe_section = (section_label or "").replace('"', "")
+        if safe_section:
+            semantic_xpath = (
+                f'//*[@content-desc="{safe_section}" or @text="{safe_section}"]'
+                '/following-sibling::*[string-length(@hint)>0 '
+                'and @max-text-length][1]'
+            )
+        else:
+            semantic_xpath = '//*[string-length(@hint)>0 and @max-text-length]'
+        for attempt in range(6):
+            try:
+                semantic_inputs = self.driver.find_elements(
+                    AppiumBy.XPATH, semantic_xpath
+                )
             except Exception:
-                continue
+                semantic_inputs = []
+            for semantic_input in semantic_inputs:
+                try:
+                    if not semantic_input.is_displayed():
+                        continue
+                    if not self._coord_tap_or_click(
+                        semantic_input, f"已聚焦{desc}输入区"
+                    ):
+                        continue
+                except Exception:
+                    continue
+                time.sleep(0.25)
+                for el in self._visible_edit_texts_checkout():
+                    try:
+                        el.clear()
+                    except Exception:
+                        pass
+                    try:
+                        el.send_keys(text)
+                        for _ in range(3):
+                            if self._checkout_page_has_any((text,)):
+                                logger.info("已输入%s：%s", desc, text)
+                                return True
+                            time.sleep(0.2)
+                    except Exception:
+                        continue
+                try:
+                    self.driver.set_clipboard_text(text)
+                    self.driver.press_keycode(279)  # Android KEYCODE_PASTE
+                    for _ in range(3):
+                        time.sleep(0.2)
+                        if self._checkout_page_has_any((text,)):
+                            logger.info(
+                                "已通过聚焦语义输入区粘贴%s：%s", desc, text
+                            )
+                            return True
+                except Exception:
+                    continue
+            if attempt < 5:
+                self._scroll_checkout_for_preferences_once(down=True)
         return False
 
     def _select_checkout_quick_note(self, label: str, desc: str, *, max_scrolls: int = 5) -> bool:
@@ -2437,14 +2501,23 @@ class TakeoutCheckoutMixin(
             logger.info("外卖备注为空且无快捷备注，跳过")
             return True
         if not self._checkout_scroll_until_visible(("备注信息", "备注", "留言"), max_rounds=8):
-            logger.warning("外卖提交页未找到备注入口，跳过")
-            return True
-        if not self._tap_first_displayed(
+            logger.error("外卖提交页未找到备注入口")
+            return False
+        opened = self._tap_first_displayed(
             AppiumBy.XPATH,
-            '//*[contains(@content-desc,"备注信息") or contains(@text,"备注信息") '
-            'or contains(@content-desc,"备注") or contains(@text,"备注") '
-            'or contains(@content-desc,"留言") or contains(@text,"留言")]',
-        ):
+            '//*[@clickable="true" and '
+            '(contains(@content-desc,"对骑手和商家有什么留言") '
+            'or contains(@text,"对骑手和商家有什么留言"))]',
+        )
+        if not opened:
+            opened = self._tap_first_displayed(
+                AppiumBy.XPATH,
+                '//*[@clickable="true" and '
+                '(contains(@content-desc,"备注信息") or contains(@text,"备注信息") '
+                'or contains(@content-desc,"备注") or contains(@text,"备注") '
+                'or contains(@content-desc,"留言") or contains(@text,"留言"))]',
+            )
+        if not opened:
             row_y = self._checkout_anchor_y_ratio(("备注信息", "备注", "留言"), default=0.84)
             try:
                 w, h = self._window_size_safe()
@@ -2456,10 +2529,24 @@ class TakeoutCheckoutMixin(
                 pass
         if not self._checkout_page_has_any(("添加备注", "对骑手备注", "对商家备注", "完成")):
             time.sleep(1.0)
-        if remark:
-            self._type_checkout_text(remark, "外卖备注文本")
-        self._select_checkout_quick_note(rider, "外卖对骑手快捷备注", max_scrolls=3)
-        self._select_checkout_quick_note(merchant, "外卖对商家快捷备注", max_scrolls=5)
+        if not self._checkout_page_has_any(("添加备注", "对骑手备注", "对商家备注", "完成")):
+            logger.error("未确认已进入外卖备注编辑页")
+            return False
+        if rider and not self._select_checkout_quick_note(
+            rider, "外卖对骑手快捷备注", max_scrolls=3
+        ):
+            return False
+        if remark and not self._type_checkout_text(
+            remark,
+            "外卖对商家备注文本",
+            section_label="对商家备注",
+        ):
+            logger.error("外卖对商家备注文本输入失败")
+            return False
+        if merchant and not self._select_checkout_quick_note(
+            merchant, "外卖对商家快捷备注", max_scrolls=5
+        ):
+            return False
         try:
             self.driver.hide_keyboard()
         except Exception:
@@ -2468,13 +2555,21 @@ class TakeoutCheckoutMixin(
             AppiumBy.XPATH,
             '//*[contains(@content-desc,"完成") or contains(@text,"完成") '
             'or contains(@content-desc,"保存") or contains(@text,"保存") '
-            'or contains(@content-desc,"确定") or contains(@text,"确定")]',
+            'or contains(@content-desc,"确定") or contains(@text,"确定") '
+            'or contains(@content-desc,"提交") or contains(@text,"提交")]',
         ):
-            try:
-                self.driver.back()
-            except Exception:
-                pass
+            logger.error("外卖备注未找到提交/完成/保存/确定按钮")
+            return False
         time.sleep(0.8)
+        if remark:
+            for readback_attempt in range(5):
+                if self._checkout_page_has_any((remark,)):
+                    break
+                if readback_attempt < 4:
+                    time.sleep(0.4)
+            else:
+                logger.error("外卖对商家备注提交后未在订单页回读到文案")
+                return False
         logger.info("外卖备注处理完成：remark=%s rider=%s merchant=%s", remark, rider, merchant)
         return True
 
@@ -2487,14 +2582,15 @@ class TakeoutCheckoutMixin(
         rider_remark: Optional[str] = DEFAULT_RIDER_REMARK,
         merchant_remark: Optional[str] = DEFAULT_MERCHANT_REMARK,
     ) -> bool:
-        self.shop_set_pickup_code(pickup_code)
-        self.shop_set_notify_method(notify_method)
-        self.shop_fill_remark(
+        if not self.shop_set_pickup_code(pickup_code):
+            return False
+        if not self.shop_set_notify_method(notify_method):
+            return False
+        return self.shop_fill_remark(
             remark_text=remark_text,
             rider_remark=rider_remark,
             merchant_remark=merchant_remark,
         )
-        return True
 
 
     def _address_sheet_label_skippable(self, blob: str, *, short_max: int = 28) -> bool:
@@ -2641,6 +2737,119 @@ class TakeoutCheckoutMixin(
             )
         logger.warning("未找到可选地址条目")
         return False
+
+    @staticmethod
+    def _address_candidate_blob(element: Any) -> str:
+        values = []
+        for attribute in ("content-desc", "text"):
+            try:
+                value = (element.get_attribute(attribute) or "").strip()
+            except Exception:
+                value = ""
+            if value and value not in values:
+                values.append(value)
+        return "\n".join(values)
+
+    @staticmethod
+    def _address_readback_token(blob: str) -> str:
+        phone_candidates = re.findall(r"(?:\d[\s-]*){6,}", blob or "")
+        if phone_candidates:
+            digits = re.sub(r"\D", "", max(phone_candidates, key=len))
+            if len(digits) >= 6:
+                return digits[-6:]
+        for line in (blob or "").splitlines():
+            compact = " ".join(line.split()).strip()
+            if len(compact) >= 4:
+                return compact[:24]
+        return ""
+
+    def shop_pick_address_in_sheet(
+        self,
+        *,
+        address_ordinal: int,
+        address_contains: Optional[str] = None,
+    ) -> bool:
+        """Select the one-based Nth existing address and verify its readback."""
+        try:
+            ordinal = int(address_ordinal)
+        except (TypeError, ValueError):
+            logger.error("真实下单缺少有效地址序号")
+            return False
+        if ordinal < 1:
+            logger.error("地址序号必须从 1 开始")
+            return False
+        matcher = (address_contains or "").strip()
+        time.sleep(0.85)
+        w, h = self._window_size_safe()[0], self._window_height()
+        seen_blobs = set()
+        seen_count = 0
+        for round_index in range(15):
+            candidates = []
+            for element in self._gather_address_sheet_candidates():
+                blob = self._address_candidate_blob(element)
+                if not blob or blob in seen_blobs:
+                    continue
+                try:
+                    y = int(element.location.get("y", 0))
+                except Exception:
+                    y = 0
+                candidates.append((y, blob, element))
+            candidates.sort(key=lambda item: item[0])
+            for _y, blob, element in candidates:
+                seen_blobs.add(blob)
+                seen_count += 1
+                if seen_count != ordinal:
+                    continue
+                if matcher and matcher not in blob:
+                    logger.error("第 %d 条地址未通过可选摘要校验", ordinal)
+                    return False
+                readback_token = matcher or self._address_readback_token(blob)
+                if not readback_token:
+                    logger.error("第 %d 条地址缺少可用于回读的稳定摘要", ordinal)
+                    return False
+                if not self._coord_tap_or_click(
+                    element, f"已选择第 {ordinal} 条地址"
+                ):
+                    return False
+                for readback_attempt in range(5):
+                    time.sleep(0.5)
+                    if self._checkout_page_has_any((readback_token,)):
+                        logger.info("已选择并回读第 %d 条地址（摘要已脱敏）", ordinal)
+                        return True
+                    if self._checkout_page_has_any(("选择支付方式",)):
+                        logger.info(
+                            "已选择第 %d 条地址，并确认进入支付方式弹层",
+                            ordinal,
+                        )
+                        return True
+                    if readback_attempt < 4:
+                        logger.info(
+                            "地址回读 UI 树尚未就绪，等待后重试（%d/5）",
+                            readback_attempt + 1,
+                        )
+                logger.error("地址点击后未回读到匹配标志")
+                return False
+            if round_index < 14:
+                self._scroll_address_sheet_list_once(w, h, round_index)
+        logger.error("已有地址不足 %d 条", ordinal)
+        return False
+
+    def wait_checkout_payable_amount(
+        self, *, max_attempts: int = 5, interval: float = 0.4
+    ) -> Optional[float]:
+        """Wait for Flutter checkout semantics to expose the final amount."""
+        for attempt in range(max_attempts):
+            payable = self.checkout_payable_amount()
+            if payable is not None:
+                return payable
+            if attempt + 1 < max_attempts:
+                logger.info(
+                    "结算金额 UI 树尚未就绪，等待后重试（%d/%d）",
+                    attempt + 1,
+                    max_attempts,
+                )
+                time.sleep(interval)
+        return None
     
 
     def shop_select_balance_payment(self) -> bool:
@@ -2714,6 +2923,8 @@ class TakeoutCheckoutMixin(
         delivery_prefer_scheduled: bool = False,
         delivery_slot_contains: Optional[str] = None,
         delivery_time_slot_ordinal: Optional[int] = None,
+        address_ordinal: Optional[int] = None,
+        address_contains: Optional[str] = None,
         checkout_payment: str = "balance",
         rounding_payment: bool = False,
         rounding_amount: float | None = None,
@@ -2764,6 +2975,12 @@ class TakeoutCheckoutMixin(
                 payable_limit = float("nan")
             if not math.isfinite(payable_limit) or payable_limit <= 0:
                 raise AssertionError("真实提交缺少有限正数 --max-payable")
+            if address_ordinal is None or address_ordinal < 1:
+                raise AssertionError("真实提交缺少有效 --address-ordinal")
+            if delivery_time_slot_ordinal is None and not (
+                delivery_slot_contains or ""
+            ).strip():
+                raise AssertionError("真实提交缺少明确配送时段")
 
         logger.info("店铺详情：开始下单支付并取消流程…")
         cat = (category or "").strip() or "店内招牌"
@@ -2798,23 +3015,15 @@ class TakeoutCheckoutMixin(
             logger.error("首次「确认支付」失败")
             return False
         time.sleep(0.6)
-        ok_addr = self.shop_pick_random_address_in_sheet()
-        if not ok_addr:
-            self._tap_first_displayed(AppiumBy.XPATH, _XPATH_DESC_SELECT_ADDRESS)
-            time.sleep(0.8)
-            ok_addr = self.shop_pick_random_address_in_sheet()
-        if not ok_addr:
-            logger.warning("地址选择可能失败，继续尝试支付方式")
-        if not self.shop_apply_checkout_coupons(coupon_policy=coupon_policy):
-            logger.error("优惠券处理失败，终止支付流程")
-            return False
-        self.shop_apply_checkout_preferences(
-            pickup_code=pickup_code,
-            notify_method=notify_method,
-            remark_text=remark_text,
-            rider_remark=rider_remark,
-            merchant_remark=merchant_remark,
+        ok_addr = self.shop_pick_address_in_sheet(
+            address_ordinal=address_ordinal or 1,
+            address_contains=address_contains,
         )
+        if not ok_addr:
+            logger.error("地址未唯一匹配并回读，终止支付流程")
+            return False
+        # 选中地址后 App 会自动打开支付方式弹层。必须先处理该弹层，
+        # 再回到结算页操作优惠券、备注和配送时段。
         if pay_mode == "cod":
             if not self.shop_select_cash_on_delivery_payment():
                 if submit_order or rounding_payment:
@@ -2825,6 +3034,18 @@ class TakeoutCheckoutMixin(
             if not self.shop_select_balance_payment():
                 logger.warning("余额支付未点到，请检查支付方式树")
         time.sleep(1.0)
+        if not self.shop_apply_checkout_coupons(coupon_policy=coupon_policy):
+            logger.error("优惠券处理失败，终止支付流程")
+            return False
+        if not self.shop_apply_checkout_preferences(
+            pickup_code=pickup_code,
+            notify_method=notify_method,
+            remark_text=remark_text,
+            rider_remark=rider_remark,
+            merchant_remark=merchant_remark,
+        ):
+            logger.error("结算偏好未完整应用，终止支付流程")
+            return False
         slot_ok = self.shop_open_delivery_time_and_pick_future_slot(
             prefer_scheduled=delivery_prefer_scheduled,
             preferred_slot_contains=delivery_slot_contains,
@@ -2836,7 +3057,7 @@ class TakeoutCheckoutMixin(
         time.sleep(0.5)
         effective_payable = None
         if rounding_payment or payable_limit is not None:
-            effective_payable = self.checkout_payable_amount()
+            effective_payable = self.wait_checkout_payable_amount()
         if rounding_payment:
             selected_rounding = self.select_checkout_rounding_payment(
                 payable=effective_payable,
