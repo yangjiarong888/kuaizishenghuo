@@ -841,6 +841,42 @@ class TakeoutCancelOrderMixin:
                 continue
         self._switch_context_safe("NATIVE_APP")
         return False
+
+    def _cancel_progress_detail_entry_visible(self) -> bool:
+        """提交取消后，订单页出现进度详情入口即视为申请已受理。"""
+        labels = ("查看订单进度详情", "订单进度详情", "查看订单进度")
+        try:
+            if self._switch_context_safe("NATIVE_APP"):
+                for label in labels:
+                    for xp in (
+                        f'//*[contains(@text,"{label}")]',
+                        f'//*[contains(@content-desc,"{label}")]',
+                    ):
+                        for el in self.driver.find_elements(AppiumBy.XPATH, xp):
+                            if el.is_displayed():
+                                logger.info("取消结果命中订单进度详情入口（Native）: %s", label)
+                                return True
+        except Exception:
+            pass
+        for wctx in self._iter_webview_contexts():
+            try:
+                if not self._switch_context_safe(wctx):
+                    continue
+                for label in labels:
+                    xp = f"//*[contains(normalize-space(string(.)),'{label}')]"
+                    for el in self.driver.find_elements(By.XPATH, xp):
+                        if el.is_displayed():
+                            logger.info(
+                                "取消结果命中订单进度详情入口（WebView %s）: %s",
+                                wctx,
+                                label,
+                            )
+                            self._switch_context_safe("NATIVE_APP")
+                            return True
+            except Exception:
+                continue
+        self._switch_context_safe("NATIVE_APP")
+        return False
     
 
     def _wait_cancel_result_after_submit(self, timeout: float = 12.0) -> bool:
@@ -878,11 +914,13 @@ class TakeoutCancelOrderMixin:
             "订单已取消",
             "取消成功",
             "已申请取消",
+            "取消申请已提交",
             "取消申请",
             "成功发起取消",
             "您的订单已取消",
             "待商家处理",
             "商家同意",
+            "需要商家同意或自动关闭",
             "退款处理中",
         )
         end = time.time() + timeout
@@ -890,6 +928,9 @@ class TakeoutCancelOrderMixin:
         cancel_entry_absent_count = 0
         while time.time() < end:
             it += 1
+            if self._cancel_progress_detail_entry_visible():
+                self._switch_context_safe("NATIVE_APP")
+                return True
             try:
                 if self._switch_context_safe("NATIVE_APP"):
                     self._tap_native_dismiss_blocking_sheet()

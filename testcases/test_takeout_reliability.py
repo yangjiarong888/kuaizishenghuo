@@ -266,12 +266,62 @@ class CoordinateOnlyCancelSubmitPage(TakeoutCancelOrderMixin):
         return self.modal_visible
 
 
+class PendingMerchantCancelDriver:
+    contexts = ["NATIVE_APP"]
+    current_context = "NATIVE_APP"
+    page_source = "订单已提交取消申请，需要商家同意或自动关闭"
+
+    def find_elements(self, by, selector):
+        return []
+
+
+class PendingMerchantCancelPage(TakeoutCancelOrderMixin):
+    def __init__(self) -> None:
+        self.driver = PendingMerchantCancelDriver()
+
+    def _window_size_safe(self):
+        return 1080, 2270
+
+    def _cancel_order_entry_still_visible(self):
+        return True
+
+
+class ProgressDetailCancelDriver:
+    contexts = ["NATIVE_APP"]
+    current_context = "NATIVE_APP"
+    page_source = "订单详情 查看订单进度详情"
+
+    def find_elements(self, by, selector):
+        if "查看订单进度详情" in selector:
+            return [FakeElement("查看订单进度详情")]
+        return []
+
+
+class ProgressDetailCancelPage(TakeoutCancelOrderMixin):
+    def __init__(self) -> None:
+        self.driver = ProgressDetailCancelDriver()
+
+
 def test_cancel_submit_uses_the_real_flutter_sheet_height_first(monkeypatch) -> None:
     monkeypatch.setattr("pages.takeout_cancel_order_mixin.time.sleep", lambda _: None)
     page = CoordinateOnlyCancelSubmitPage()
 
     assert page._tap_native_submit_cancel_sheet()
     assert page.driver.taps[0] == (540, int(2270 * 0.66))
+
+
+def test_cancel_result_accepts_pending_merchant_confirmation(monkeypatch) -> None:
+    monkeypatch.setattr("pages.takeout_cancel_order_mixin.time.sleep", lambda _: None)
+    page = PendingMerchantCancelPage()
+
+    assert page._wait_cancel_result_after_submit(timeout=1.0)
+
+
+def test_cancel_result_accepts_order_progress_detail_entry(monkeypatch) -> None:
+    monkeypatch.setattr("pages.takeout_cancel_order_mixin.time.sleep", lambda _: None)
+    page = ProgressDetailCancelPage()
+
+    assert page._wait_cancel_result_after_submit(timeout=1.0)
 
 
 def test_address_selection_supports_an_optional_match_guard(monkeypatch) -> None:

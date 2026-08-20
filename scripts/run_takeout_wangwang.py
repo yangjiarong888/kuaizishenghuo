@@ -7,12 +7,12 @@
 
 用法:
   python scripts/run_takeout_wangwang.py
-  python scripts/run_takeout_wangwang.py --shop "旺旺超市 WWCS"
+  python scripts/run_takeout_wangwang.py --shop "旺旺超市 WWCS"     指定店铺
   python scripts/run_takeout_wangwang.py --session my_session
   python scripts/run_takeout_wangwang.py --no-manila
   python scripts/run_takeout_wangwang.py --checkout
-  python scripts/run_takeout_wangwang.py --checkout --submit-order --max-payable 5000 --address-ordinal 1 --delivery-time-slot-ordinal 1
-  python scripts/run_takeout_wangwang.py --checkout --category "健康粮油"
+  python scripts/run_takeout_wangwang.py --checkout --submit-order --max-payable 5000 --address-ordinal 1 --delivery-time-slot-ordinal 1    真实下单
+  python scripts/run_takeout_wangwang.py --checkout --category "健康粮油"   指定商品分类
   python scripts/run_takeout_wangwang.py --checkout --delivery-time-slot-ordinal 5
   python scripts/run_takeout_wangwang.py --checkout --delivery-slot-contains 01:40
   python scripts/run_takeout_wangwang.py --checkout --checkout-payment cod
