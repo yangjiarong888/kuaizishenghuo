@@ -2,7 +2,7 @@
 
 ## 目标
 
-根据录屏完善国际货运自动化，新增项目根目录 `package.py` 作为独立执行入口，并扩展 `pages/shipping_page.py` 页面对象。脚本必须从筷子生活首页进入国际货运，覆盖海运首页与配送订单 Tab 切换、公共地址选择或新增、未来配送时间选择、真实订单提交、余额真实支付、货到付款、待支付取消及订单状态校验。
+根据录屏完善国际货运自动化，使用 `scripts/run_shipping_business.py` 作为独立执行入口，并扩展 `pages/shipping_page.py` 页面对象。脚本必须从筷子生活首页进入国际货运，覆盖海运首页与配送订单 Tab 切换、公共地址选择或新增、未来配送时间选择、真实订单提交、余额真实支付、货到付款、待支付取消及订单状态校验。
 
 ## 已确认范围
 
@@ -27,7 +27,7 @@
 
 ## 文件与职责
 
-### `package.py`
+### `scripts/run_shipping_business.py`
 
 独立命令行入口，负责：
 
@@ -146,9 +146,9 @@
 建议入口：
 
 ```text
-python package.py --payment-method balance --address-policy auto
-python package.py --payment-method cod --address-policy existing
-python package.py --payment-method balance --cancel-unpaid --address-policy add
+python scripts/run_shipping_business.py --payment-method balance --address-policy auto
+python scripts/run_shipping_business.py --payment-method cod --address-policy existing
+python scripts/run_shipping_business.py --payment-method balance --cancel-unpaid --address-policy add
 ```
 
 参数：
@@ -226,7 +226,7 @@ python package.py --payment-method balance --cancel-unpaid --address-policy add
 
 ## 验收标准
 
-- `package.py` 能从 App 首页进入国际货运。
+- `scripts/run_shipping_business.py` 能从 App 首页进入国际货运。
 - 海运首页和配送订单 Tab 均可识别并往返。
 - 公共地址可按策略选择已有地址或新增地址，并验证回填。
 - 选中的配送日期严格晚于设备当天。

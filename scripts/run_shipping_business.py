@@ -5,7 +5,12 @@ from __future__ import annotations
 
 import argparse
 import os
-from typing import Mapping, Sequence
+import sys
+from collections.abc import Mapping, Sequence
+from pathlib import Path
+
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from commons.driver import DriverManager
 from commons.logger import setup_logger

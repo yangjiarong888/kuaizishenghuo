@@ -1,9 +1,21 @@
-"""Reusable login-method dispatch for production entry points."""
+"""Login CLI and reusable login-method dispatch."""
 
 from __future__ import annotations
 
+import argparse
+import sys
+from collections.abc import Sequence
+from pathlib import Path
+
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from commons.driver import DriverManager
-from pages.login_page import LoginPage
+from commons.logger import setup_logger
+from pages.login_page import LoginData, LoginPage
+
+
+logger = setup_logger(__name__)
 
 
 SUPPORTED_LOGIN_METHODS = frozenset(
@@ -17,6 +29,37 @@ SUPPORTED_LOGIN_METHODS = frozenset(
         "forget_password",
     }
 )
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="筷子生活登录自动化")
+    parser.add_argument(
+        "--method",
+        type=lambda value: value.strip().lower(),
+        choices=sorted(SUPPORTED_LOGIN_METHODS),
+        required=True,
+        help="登录方式",
+    )
+    parser.add_argument(
+        "--no-from-home",
+        action="store_true",
+        help="当前已在登录页面，不从首页进入",
+    )
+    parser.add_argument("--phone", help="手机号；默认读取 LOGIN_DEFAULT_PHONE")
+    parser.add_argument("--password", help="密码；默认读取 LOGIN_DEFAULT_PASSWORD")
+    parser.add_argument("--code", help="短信验证码")
+    return parser
+
+
+def _missing_required_login_fields(method: str, data: LoginData) -> list[str]:
+    missing: list[str] = []
+    if method in ("phone", "password", "forget_password") and not data.resolved_phone():
+        missing.append("LOGIN_DEFAULT_PHONE/--phone")
+    if method == "password" and not data.resolved_password():
+        missing.append("LOGIN_DEFAULT_PASSWORD/--password")
+    if method == "forget_password" and not data.resolved_new_password():
+        missing.append("LOGIN_DEFAULT_NEW_PASSWORD")
+    return missing
 
 
 def run_login_method(
@@ -50,3 +93,38 @@ def run_login_method(
     finally:
         if owned:
             DriverManager().close_driver(resolved_session)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    data_kwargs = {}
+    if args.phone:
+        data_kwargs["phone"] = args.phone.strip()
+    if args.password:
+        data_kwargs["password"] = args.password
+    data = LoginData(**data_kwargs)
+    if args.code:
+        data.verification_code = args.code.strip()
+
+    missing = _missing_required_login_fields(args.method, data)
+    if missing:
+        logger.error("缺少登录参数：%s", ", ".join(missing))
+        return 2
+
+    session_name = f"login_{args.method}"
+    page = LoginPage(session_name=session_name, data=data)
+    try:
+        ok = run_login_method(
+            args.method,
+            page=page,
+            from_home=not args.no_from_home,
+            session_name=session_name,
+        )
+        logger.info("登录方法 %s 执行结果: %s", args.method, "成功" if ok else "失败")
+        return 0 if ok else 1
+    finally:
+        DriverManager().close_driver(session_name)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

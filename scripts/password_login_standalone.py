@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 仅「账号密码登录」入口，逻辑与项目根目录执行
-  python login.page.py --method password
+  python scripts/run_login.py --method password
 一致。可复制本文件到其它目录时：保留同级 `pages/`、`commons/` 等包，或把下面 ROOT 改成你的项目根。
 
 用法（在 kuaizishenghuo 项目根目录）:

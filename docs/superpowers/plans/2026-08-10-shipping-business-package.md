@@ -2,15 +2,15 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build `package.py` and a maintainable Appium page object that starts from the Chopsticks Life home page, creates a real international-shipping order with a shared address and a future delivery slot, then handles balance payment, cash on delivery, or unpaid-payment cancellation safely.
+**Goal:** Build `scripts/run_shipping_business.py` and a maintainable Appium page object that starts from the Chopsticks Life home page, creates a real international-shipping order with a shared address and a future delivery slot, then handles balance payment, cash on delivery, or unpaid-payment cancellation safely.
 
-**Architecture:** Keep `ShippingPage` as the public facade and split shared-address, delivery-slot, and payment-state behavior into focused mixins. Put date parsing, address validation, masking, and payment-state decisions in pure functions so the dangerous business rules are testable without Appium or real orders. The root `package.py` validates all CLI and secret inputs before creating a driver, then calls one `run_order_flow` facade method.
+**Architecture:** Keep `ShippingPage` as the public facade and split shared-address, delivery-slot, and payment-state behavior into focused mixins. Put date parsing, address validation, masking, and payment-state decisions in pure functions so the dangerous business rules are testable without Appium or real orders. `scripts/run_shipping_business.py` validates all CLI and secret inputs before creating a driver, then calls one `run_order_flow` facade method.
 
 **Tech Stack:** Python 3.11, pytest, Appium Python Client, Selenium explicit waits, existing `DriverManager`, `commons.logger`, and `commons.diagnostics`.
 
 ## Global Constraints
 
-- The executable filename is exactly `package.py` at the repository root.
+- The executable filename is exactly `scripts/run_shipping_business.py`.
 - The flow must enter by clicking “国际货运” from the Chopsticks Life home page.
 - The shipping home and “配送订单” tabs must support verified two-way switching.
 - The delivery address uses the same public address book as takeout and supports selecting an existing address or adding a new one.
@@ -34,7 +34,7 @@
 - Create `pages/shipping_delivery_mixin.py`: delivery-picker discovery, earliest-future selection, and read-back validation.
 - Create `pages/shipping_payment_mixin.py`: single-submit guard, balance/COD handling, order-state checks, and unpaid cancellation.
 - Modify `pages/shipping_page.py`: reliable find/click helpers, home entry, tab navigation, diagnostics, and flow orchestration.
-- Create `package.py`: CLI, environment-variable loading, preflight validation, driver lifecycle, and exit status.
+- Create `scripts/run_shipping_business.py`: CLI, environment-variable loading, preflight validation, driver lifecycle, and exit status.
 - Create `testcases/test_shipping_types.py`: pure rule tests.
 - Create `testcases/test_shipping_page.py`: fake-driver page-object tests.
 - Create `testcases/test_package_cli.py`: CLI preflight and driver-boundary tests.
@@ -903,10 +903,10 @@ git commit -m "feat: handle shipping payment states safely"
 
 ---
 
-### Task 6: Root `package.py` CLI and Preflight Boundary
+### Task 6: `scripts/run_shipping_business.py` CLI and Preflight Boundary
 
 **Files:**
-- Create: `package.py`
+- Create: `scripts/run_shipping_business.py`
 - Create: `testcases/test_package_cli.py`
 
 **Interfaces:**
@@ -916,7 +916,7 @@ git commit -m "feat: handle shipping payment states safely"
 - [ ] **Step 1: Write failing parser and invalid-combination tests**
 
 ```python
-import package
+from scripts import run_shipping_business
 
 
 def test_cli_defaults_to_balance_and_auto_address():
@@ -943,7 +943,7 @@ def test_cod_rejects_cancel_unpaid_before_driver_creation(monkeypatch):
 
 Run: `pytest -q testcases/test_package_cli.py`
 
-Expected: import fails because root `package.py` does not exist.
+Expected: import fails because `scripts/run_shipping_business.py` does not exist.
 
 - [ ] **Step 3: Implement parser and environment readers**
 
@@ -1067,14 +1067,14 @@ Expected: all tests pass and no real driver is created.
 
 - [ ] **Step 8: Verify CLI help text**
 
-Run: `python package.py --help`
+Run: `python scripts/run_shipping_business.py --help`
 
 Expected: exit code `0` and visible options for payment method, unpaid cancellation, address policy, session, and driver cleanup.
 
 - [ ] **Step 9: Commit CLI**
 
 ```bash
-git add package.py testcases/test_package_cli.py
+git add scripts/run_shipping_business.py testcases/test_package_cli.py
 git commit -m "feat: add shipping package command"
 ```
 
@@ -1083,7 +1083,7 @@ git commit -m "feat: add shipping package command"
 ### Task 7: Regression, Static Safety Review, and Real-Device Preflight
 
 **Files:**
-- Modify only if a test exposes a shipping-scope defect: `pages/shipping_*.py`, `pages/shipping_page.py`, `package.py`, or their new tests.
+- Modify only if a test exposes a shipping-scope defect: `pages/shipping_*.py`, `pages/shipping_page.py`, `scripts/run_shipping_business.py`, or their new tests.
 - Do not modify unrelated application modules to silence failures.
 
 **Interfaces:**
@@ -1104,13 +1104,13 @@ Expected: all repository tests pass. If an unrelated pre-existing failure occurs
 
 - [ ] **Step 3: Compile every changed Python file**
 
-Run: `python -m py_compile package.py pages/shipping_types.py pages/shipping_address_mixin.py pages/shipping_delivery_mixin.py pages/shipping_payment_mixin.py pages/shipping_page.py`
+Run: `python -m py_compile scripts/run_shipping_business.py pages/shipping_types.py pages/shipping_address_mixin.py pages/shipping_delivery_mixin.py pages/shipping_payment_mixin.py pages/shipping_page.py`
 
 Expected: exit code `0` with no output.
 
 - [ ] **Step 4: Scan changed code for secret leakage and fixed-coordinate primary selectors**
 
-Run: `rg -n "pay_password|SHIPPING_PAY_PASSWORD|ADDRESS_DETAIL|clickGesture|tap\(" package.py pages/shipping_*.py`
+Run: `rg -n "pay_password|SHIPPING_PAY_PASSWORD|ADDRESS_DETAIL|clickGesture|tap\(" scripts/run_shipping_business.py pages/shipping_*.py`
 
 Expected: password references only perform presence checks or `send_keys`; no log format includes the secret variable. Coordinate fallbacks are paired with page-state assertions and are not the first locator strategy.
 
@@ -1122,12 +1122,12 @@ Expected: no whitespace errors; only planned shipping files/tests are modified b
 
 - [ ] **Step 6: Run a non-mutating real-device preflight before any real order**
 
-Run these checks without invoking `package.py`:
+Run these checks without invoking `scripts/run_shipping_business.py`:
 
 ```powershell
 Invoke-RestMethod -Uri http://127.0.0.1:4723/status
 adb devices
-python package.py --help
+python scripts/run_shipping_business.py --help
 ```
 
 Expected: Appium reports ready, exactly one intended Android device is available or `ANDROID_DEVICE_NAME` identifies it, and CLI help succeeds. If Appium or address/payment environment data is missing, stop and report the concrete blocker before any order is created.
@@ -1148,19 +1148,19 @@ Expected: every variable needed by the selected scenario reports `Configured=Tru
 Balance example:
 
 ```powershell
-python package.py --payment-method balance --address-policy auto --quit-driver
+python scripts/run_shipping_business.py --payment-method balance --address-policy auto --quit-driver
 ```
 
 COD example:
 
 ```powershell
-python package.py --payment-method cod --address-policy existing --quit-driver
+python scripts/run_shipping_business.py --payment-method cod --address-policy existing --quit-driver
 ```
 
 Unpaid-cancel example:
 
 ```powershell
-python package.py --payment-method balance --cancel-unpaid --address-policy auto --quit-driver
+python scripts/run_shipping_business.py --payment-method balance --cancel-unpaid --address-policy auto --quit-driver
 ```
 
 Expected: run only one selected command, create at most one real order, and capture order number, selected future delivery time, payment method, final payment state, and diagnostic artifact paths. Never run all three examples as a batch.
@@ -1174,7 +1174,7 @@ Expected: all focused tests pass after the final code state.
 - [ ] **Step 10: Commit final shipping-scope adjustments**
 
 ```bash
-git add package.py pages/shipping_types.py pages/shipping_address_mixin.py pages/shipping_delivery_mixin.py pages/shipping_payment_mixin.py pages/shipping_page.py testcases/test_shipping_types.py testcases/test_shipping_page.py testcases/test_package_cli.py
+git add scripts/run_shipping_business.py pages/shipping_types.py pages/shipping_address_mixin.py pages/shipping_delivery_mixin.py pages/shipping_payment_mixin.py pages/shipping_page.py testcases/test_shipping_types.py testcases/test_shipping_page.py testcases/test_package_cli.py
 git commit -m "test: verify shipping business automation"
 ```
 
@@ -1188,7 +1188,7 @@ Skip this commit if Task 7 made no code or test changes.
 - [ ] Focused shipping tests pass in the final code state.
 - [ ] Full regression results are recorded accurately.
 - [ ] Changed Python files compile.
-- [ ] `package.py --help` succeeds.
+- [ ] `scripts/run_shipping_business.py --help` succeeds.
 - [ ] The flow starts from the App home page and clicks “国际货运”.
 - [ ] Shipping home and delivery-order tabs switch both ways with state assertions.
 - [ ] Existing and newly added public addresses are supported and verified after selection.

@@ -1,10 +1,16 @@
 import logging
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
-import package
+from scripts import run_shipping_business as package
 
 from pages.shipping_types import AddressPolicy, PaymentMethod
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture(autouse=True)
@@ -40,6 +46,21 @@ def test_cli_defaults_to_balance_and_auto_address():
     assert args.payment_method == "balance"
     assert args.address_policy == "auto"
     assert args.cancel_unpaid is False
+
+
+def test_shipping_cli_direct_help_runs_from_repository_root():
+    result = subprocess.run(
+        [sys.executable, "scripts/run_shipping_business.py", "--help"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "国际货运真实订单自动化" in result.stdout
 
 
 def test_cli_closes_driver_by_default_to_restore_system_keyboard(monkeypatch):

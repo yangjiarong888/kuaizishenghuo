@@ -1,5 +1,5 @@
 """兼容旧路径：`from pages.login_page import LoginPage, LoginData`。
-python login.page.py --method password/phone/wechat/qq
+python scripts/run_login.py --method password/phone/wechat/qq
 """
 from pages.login.data import Locator, LoginData
 from pages.login.login_page import LoginPage
