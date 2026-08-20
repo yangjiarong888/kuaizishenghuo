@@ -199,8 +199,12 @@ def test_checkout_passes_explicit_submit_intent_to_page_flow(
         def __init__(self):
             self.closed = []
 
-        def get_driver(self, *, session_name):
+        def get_driver(self, *, session_name, **kwargs):
             assert session_name == "takeout_wangwang"
+            assert kwargs == {
+                "unicode_keyboard": False,
+                "reset_keyboard": False,
+            }
             return fake_driver
 
         def close_driver(self, *, session_name):
@@ -243,7 +247,11 @@ def test_checkout_passes_rounding_and_cap_to_page_flow(monkeypatch) -> None:
         def __init__(self):
             self.closed = []
 
-        def get_driver(self, *, session_name):
+        def get_driver(self, *, session_name, **kwargs):
+            assert kwargs == {
+                "unicode_keyboard": False,
+                "reset_keyboard": False,
+            }
             return fake_driver
 
         def close_driver(self, *, session_name):
@@ -287,8 +295,12 @@ def test_takeout_main_always_closes_driver_after_flow_failure(monkeypatch) -> No
     fake_driver = object()
 
     class FakeManager:
-        def get_driver(self, *, session_name):
+        def get_driver(self, *, session_name, **kwargs):
             calls.append(("get", session_name))
+            assert kwargs == {
+                "unicode_keyboard": False,
+                "reset_keyboard": False,
+            }
             return fake_driver
 
         def close_driver(self, *, session_name):
@@ -311,3 +323,34 @@ def test_takeout_main_always_closes_driver_after_flow_failure(monkeypatch) -> No
 
     assert script.main(["--checkout"]) == 1
     assert calls[-1] == ("close", "takeout_wangwang")
+
+
+def test_takeout_driver_never_switches_to_appium_unicode_keyboard(monkeypatch) -> None:
+    received = []
+    fake_driver = object()
+
+    class FakeManager:
+        def get_driver(
+            self,
+            *,
+            session_name,
+            unicode_keyboard,
+            reset_keyboard,
+        ):
+            received.append(
+                (session_name, unicode_keyboard, reset_keyboard)
+            )
+            return fake_driver
+
+        def close_driver(self, *, session_name):
+            pass
+
+    monkeypatch.setattr(script, "DriverManager", FakeManager)
+    monkeypatch.setattr(
+        script,
+        "open_wangwang_supermarket_from_takeout_home",
+        lambda *args, **kwargs: True,
+    )
+
+    assert script.main([]) == 0
+    assert received == [("takeout_wangwang", False, False)]

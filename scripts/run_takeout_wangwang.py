@@ -263,7 +263,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     driver = None
     ok = False
     try:
-        driver = manager.get_driver(session_name=args.session)
+        # 本流程通过 Flutter 语义输入区/剪贴板填写英文备注，无需 Appium
+        # UnicodeIME。禁用它可避免异常断连后系统默认输入法被遗留替换。
+        driver = manager.get_driver(
+            session_name=args.session,
+            unicode_keyboard=False,
+            reset_keyboard=False,
+        )
         ok = open_wangwang_supermarket_from_takeout_home(
             driver,
             shop_name=args.shop,
