@@ -2822,6 +2822,20 @@ class TakeoutCheckoutMixin(
                             ordinal,
                         )
                         return True
+                    if self._checkout_page_has_any(("当前地址未填写手机号",)):
+                        if not self._tap_first_displayed(
+                            AppiumBy.XPATH,
+                            '//*[@content-desc="确认并继续使用" or '
+                            '@text="确认并继续使用"]',
+                        ):
+                            logger.error("地址缺手机号提示已出现，但未点到继续使用")
+                            return False
+                        logger.info(
+                            "第 %d 条地址缺手机号，已确认继续使用并等待支付方式弹层",
+                            ordinal,
+                        )
+                        time.sleep(0.5)
+                        continue
                     if readback_attempt < 4:
                         logger.info(
                             "地址回读 UI 树尚未就绪，等待后重试（%d/5）",

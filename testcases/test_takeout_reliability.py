@@ -51,7 +51,7 @@ class DelayedAddressReadbackPage(AddressPage):
         self.readbacks = list(readbacks)
 
     def _checkout_page_has_any(self, labels):
-        if "选择支付方式" in labels:
+        if "选择支付方式" in labels or "当前地址未填写手机号" in labels:
             return False
         return self.readbacks.pop(0)
 
@@ -59,6 +59,25 @@ class DelayedAddressReadbackPage(AddressPage):
 class PaymentSheetAfterAddressPage(AddressPage):
     def _checkout_page_has_any(self, labels):
         return "选择支付方式" in labels
+
+
+class MissingPhoneAfterAddressPage(AddressPage):
+    def __init__(self, candidates) -> None:
+        super().__init__(candidates)
+        self.confirmed_missing_phone = False
+
+    def _checkout_page_has_any(self, labels):
+        if "选择支付方式" in labels:
+            return self.confirmed_missing_phone
+        if "当前地址未填写手机号" in labels:
+            return not self.confirmed_missing_phone
+        return False
+
+    def _tap_first_displayed(self, by, selector):
+        if "确认并继续使用" not in selector:
+            return False
+        self.confirmed_missing_phone = True
+        return True
 
 
 class MissingRemarkPage(TakeoutCheckoutMixin):
@@ -315,6 +334,18 @@ def test_address_selection_accepts_the_automatic_payment_sheet_transition(
 
     assert page.shop_pick_address_in_sheet(address_ordinal=1)
     assert page.clicked == ["First Manila 09111111111"]
+
+
+def test_address_selection_confirms_missing_phone_before_payment_sheet(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr("pages.takeout_checkout_mixin.time.sleep", lambda _: None)
+    page = MissingPhoneAfterAddressPage(
+        [FakeElement("First Manila 09111111111")]
+    )
+
+    assert page.shop_pick_address_in_sheet(address_ordinal=1)
+    assert page.confirmed_missing_phone
 
 
 def test_address_selection_uses_the_requested_one_based_ordinal(
