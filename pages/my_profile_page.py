@@ -59,6 +59,10 @@ class MyProfilePage:
             ProfileTarget("general", "商家入驻", ("入驻申请", "立即入驻", "商家信息")),
         )
 
+    @classmethod
+    def _approved_targets(cls) -> frozenset[ProfileTarget]:
+        return frozenset((*cls.default_targets(), *cls.logged_out_targets()))
+
     def _app_package_is_expected(self) -> bool:
         try:
             return str(self.driver.current_package) in APP_PACKAGES
@@ -109,6 +113,8 @@ class MyProfilePage:
         labels = tuple(labels)
         deadline = time.monotonic() + self.wait_sec
         while True:
+            if not self._app_package_is_expected():
+                return False
             if any(self._unique_label(label) is not None for label in labels):
                 return True
             if time.monotonic() >= deadline:
@@ -128,6 +134,8 @@ class MyProfilePage:
         return self._wait_for_any_label(_PROFILE_PAGE_MARKERS)
 
     def open_target(self, target: ProfileTarget) -> bool:
+        if target not in self._approved_targets():
+            return False
         if not self._app_package_is_expected():
             return False
         element = self._unique_label(target.label)
@@ -152,6 +160,8 @@ class MyProfilePage:
         targets: Sequence[ProfileTarget] | None = None,
     ) -> bool:
         selected = tuple(targets) if targets is not None else self.default_targets()
+        if any(target not in self._approved_targets() for target in selected):
+            return False
         if not self.open_my_tab():
             return False
         for target in selected:

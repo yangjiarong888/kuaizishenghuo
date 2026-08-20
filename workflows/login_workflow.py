@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from enum import Enum
 
+from appium.webdriver.common.appiumby import AppiumBy
+
 from workflows.result import WorkflowResult, WorkflowStage, WorkflowStatus
 
 
@@ -21,24 +23,55 @@ LoginAction = Callable[[], bool]
 def _normalize_state(value: object) -> LoginState:
     if isinstance(value, LoginState):
         return value
-    if value is True:
-        return LoginState.LOGGED_IN
-    if value is False:
-        return LoginState.LOGGED_OUT
     return LoginState.UNKNOWN
+
+
+def _visible_any(driver: object, selectors: tuple[tuple[str, str], ...]) -> bool | None:
+    found = False
+    for by, value in selectors:
+        try:
+            elements = driver.find_elements(by, value)
+        except Exception:
+            return None
+        for element in elements:
+            try:
+                if element.is_displayed():
+                    found = True
+            except Exception:
+                return None
+    return found
 
 
 def detect_login_state(page: object) -> LoginState:
-    """Probe login state without starting a login flow."""
-    for name in ("check_login_status_smart", "_home_logged_in_quick_check"):
-        probe = getattr(page, name, None)
-        if not callable(probe):
-            continue
-        try:
-            return _normalize_state(probe())
-        except Exception:
+    """Use independent visible signals without clicking or dismissing UI."""
+    driver = getattr(page, "driver", None)
+    if driver is None:
+        return LoginState.UNKNOWN
+    try:
+        if str(driver.current_package) != "com.bs.feifubao":
             return LoginState.UNKNOWN
-    return LoginState.UNKNOWN
+    except Exception:
+        return LoginState.UNKNOWN
+
+    logged_in = _visible_any(
+        driver,
+        (
+            (AppiumBy.ID, "com.bs.feifubao:id/ll_exchange_rate"),
+            (AppiumBy.ID, "com.ba.feifubao:id/ll_exchange_rate"),
+        ),
+    )
+    logged_out = _visible_any(
+        driver,
+        (
+            (
+                AppiumBy.XPATH,
+                '//*[@text="立即登录" or @text="登录筷子生活"]',
+            ),
+        ),
+    )
+    if logged_in is None or logged_out is None or logged_in == logged_out:
+        return LoginState.UNKNOWN
+    return LoginState.LOGGED_IN if logged_in else LoginState.LOGGED_OUT
 
 
 def ensure_logged_in(

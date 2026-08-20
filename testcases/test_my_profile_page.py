@@ -30,11 +30,12 @@ def test_sensitive_profile_mutation_apis_do_not_exist():
 
 
 class FakeElement:
-    def __init__(self, label, *, y=100, displayed=True, enabled=True):
+    def __init__(self, label, *, y=100, displayed=True, enabled=True, on_click=None):
         self.label = label
         self.location = {"y": y}
         self.displayed = displayed
         self.enabled = enabled
+        self.on_click = on_click
         self.clicks = 0
 
     def is_displayed(self):
@@ -45,6 +46,8 @@ class FakeElement:
 
     def click(self):
         self.clicks += 1
+        if self.on_click is not None:
+            self.on_click()
 
 
 class FakeDriver:
@@ -91,6 +94,52 @@ def test_open_my_tab_requires_a_read_only_page_marker_after_click():
     assert tab.clicks == 1
 
 
+def test_arbitrary_non_allowlisted_target_is_rejected_without_clicking():
+    dangerous = FakeElement("申请注销账户")
+    driver = FakeDriver(elements=[dangerous])
+    page = MyProfilePage(driver, wait_sec=0)
+
+    result = page.open_target(
+        ProfileTarget("account", "申请注销账户", ("确认注销",))
+    )
+
+    assert result is False
+    assert dangerous.clicks == 0
+
+
+def test_target_marker_wait_fails_if_click_leaves_expected_package():
+    driver = FakeDriver()
+    target = MyProfilePage.default_targets()[0]
+    entry = FakeElement(target.label, on_click=lambda: setattr(driver, "current_package", "other.app"))
+    marker = FakeElement(target.marker_labels[0])
+    driver.elements = [entry, marker]
+    page = MyProfilePage(driver, wait_sec=0.01)
+
+    assert page.open_target(target) is False
+    assert entry.clicks == 1
+
+
+def test_missing_or_duplicate_target_is_fail_closed():
+    target = MyProfilePage.default_targets()[0]
+    missing_page = MyProfilePage(FakeDriver(), wait_sec=0)
+    first = FakeElement(target.label)
+    second = FakeElement(target.label)
+    duplicate_page = MyProfilePage(FakeDriver(elements=[first, second]), wait_sec=0)
+
+    assert missing_page.open_target(target) is False
+    assert duplicate_page.open_target(target) is False
+    assert first.clicks == second.clicks == 0
+
+
+def test_target_marker_timeout_is_fail_closed():
+    target = MyProfilePage.default_targets()[0]
+    entry = FakeElement(target.label)
+    page = MyProfilePage(FakeDriver(elements=[entry]), wait_sec=0)
+
+    assert page.open_target(target) is False
+    assert entry.clicks == 1
+
+
 class ScriptedProfilePage(MyProfilePage):
     def __init__(self, outcomes):
         self.outcomes = iter(outcomes)
@@ -104,16 +153,12 @@ class ScriptedProfilePage(MyProfilePage):
         return next(self.outcomes)
 
     def return_to_my_page(self):
-        return True
+        return next(self.outcomes)
 
 
 def test_navigation_stops_after_first_uncertain_transition():
-    page = ScriptedProfilePage([True, False, True])
-    targets = (
-        ProfileTarget("account", "我的订单", ("我的订单",)),
-        ProfileTarget("account", "优惠券", ("优惠券",)),
-        ProfileTarget("account", "我的余额", ("我的余额",)),
-    )
+    page = ScriptedProfilePage([True, True, False, True])
+    targets = MyProfilePage.default_targets()[:3]
 
     assert page.run_navigation_smoke(targets=targets) is False
     assert page.opened == ["我的订单", "优惠券"]
