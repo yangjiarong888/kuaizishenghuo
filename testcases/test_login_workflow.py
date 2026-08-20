@@ -10,8 +10,8 @@ class VisibleElement:
 
 
 class FakeLoginDriver:
-    def __init__(self, state):
-        self.current_package = "com.bs.feifubao"
+    def __init__(self, state, package="com.bs.feifubao"):
+        self.current_package = package
         self.state = state
 
     def find_elements(self, by, value):
@@ -23,8 +23,8 @@ class FakeLoginDriver:
 
 
 class FakeLoginPage:
-    def __init__(self, state):
-        self.driver = FakeLoginDriver(state)
+    def __init__(self, state, package="com.bs.feifubao"):
+        self.driver = FakeLoginDriver(state, package)
 
 
 def test_already_logged_in_never_calls_login_action():
@@ -102,3 +102,9 @@ def test_detector_can_report_explicit_tri_state():
     )
 
     assert result.status is WorkflowStatus.LOGIN_STATE_UNKNOWN
+
+
+def test_read_only_detector_supports_known_alternate_app_package():
+    page = FakeLoginPage("logged_in", package="com.ba.feifubao")
+
+    assert detect_login_state(page) is LoginState.LOGGED_IN

@@ -13,7 +13,14 @@ from commons.logger import setup_logger
 
 logger = setup_logger(__name__)
 
-APP_PACKAGES = frozenset({"com.bs.feifubao"})
+APP_PACKAGES = frozenset(
+    {
+        "com.bs.feifubao",
+        "com.ba.feifubao",
+        "com.bx.feifubao",
+        "com.hu.feifubao",
+    }
+)
 _PROFILE_PAGE_MARKERS = (
     "我的订单",
     "优惠券",

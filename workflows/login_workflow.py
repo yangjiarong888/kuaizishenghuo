@@ -18,6 +18,14 @@ class LoginState(str, Enum):
 
 StateDetector = Callable[[object], LoginState]
 LoginAction = Callable[[], bool]
+APP_PACKAGES = frozenset(
+    {
+        "com.bs.feifubao",
+        "com.ba.feifubao",
+        "com.bx.feifubao",
+        "com.hu.feifubao",
+    }
+)
 
 
 def _normalize_state(value: object) -> LoginState:
@@ -48,7 +56,8 @@ def detect_login_state(page: object) -> LoginState:
     if driver is None:
         return LoginState.UNKNOWN
     try:
-        if str(driver.current_package) != "com.bs.feifubao":
+        current_package = str(driver.current_package)
+        if current_package not in APP_PACKAGES:
             return LoginState.UNKNOWN
     except Exception:
         return LoginState.UNKNOWN
@@ -56,8 +65,7 @@ def detect_login_state(page: object) -> LoginState:
     logged_in = _visible_any(
         driver,
         (
-            (AppiumBy.ID, "com.bs.feifubao:id/ll_exchange_rate"),
-            (AppiumBy.ID, "com.ba.feifubao:id/ll_exchange_rate"),
+            (AppiumBy.ID, f"{current_package}:id/ll_exchange_rate"),
         ),
     )
     logged_out = _visible_any(

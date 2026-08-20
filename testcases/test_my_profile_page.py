@@ -51,9 +51,10 @@ class FakeElement:
 
 
 class FakeDriver:
-    def __init__(self, *, package="com.bs.feifubao", elements=None):
+    def __init__(self, *, package="com.bs.feifubao", elements=None, on_back=None):
         self.current_package = package
         self.elements = list(elements or [])
+        self.on_back = on_back
         self.back_calls = 0
 
     def get_window_size(self):
@@ -66,6 +67,8 @@ class FakeDriver:
 
     def back(self):
         self.back_calls += 1
+        if self.on_back is not None:
+            self.on_back()
 
 
 def test_open_my_tab_rejects_wrong_package_without_clicking():
@@ -92,6 +95,17 @@ def test_open_my_tab_requires_a_read_only_page_marker_after_click():
 
     assert page.open_my_tab() is True
     assert tab.clicks == 1
+
+
+def test_open_my_tab_supports_known_alternate_app_package():
+    tab = FakeElement("我的", y=1700)
+    marker = FakeElement("我的订单")
+    page = MyProfilePage(
+        FakeDriver(package="com.ba.feifubao", elements=[tab, marker]),
+        wait_sec=0.01,
+    )
+
+    assert page.open_my_tab() is True
 
 
 def test_arbitrary_non_allowlisted_target_is_rejected_without_clicking():
@@ -162,3 +176,26 @@ def test_navigation_stops_after_first_uncertain_transition():
 
     assert page.run_navigation_smoke(targets=targets) is False
     assert page.opened == ["我的订单", "优惠券"]
+
+
+def test_navigation_stops_when_real_back_leaves_expected_package():
+    driver = FakeDriver()
+    driver.on_back = lambda: setattr(driver, "current_package", "other.app")
+
+    class BackLeavingPage(MyProfilePage):
+        def __init__(self):
+            super().__init__(driver, wait_sec=0)
+            self.opened = []
+
+        def open_my_tab(self):
+            return True
+
+        def open_target(self, target):
+            self.opened.append(target.label)
+            return True
+
+    page = BackLeavingPage()
+
+    assert page.run_navigation_smoke(targets=page.default_targets()[:2]) is False
+    assert driver.back_calls == 1
+    assert page.opened == ["我的订单"]
