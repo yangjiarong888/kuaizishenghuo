@@ -916,7 +916,7 @@ git commit -m "feat: handle shipping payment states safely"
 - [ ] **Step 1: Write failing parser and invalid-combination tests**
 
 ```python
-from scripts import run_shipping_business
+from scripts import run_shipping_business as package
 
 
 def test_cli_defaults_to_balance_and_auto_address():
