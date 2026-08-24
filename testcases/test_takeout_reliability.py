@@ -269,7 +269,7 @@ class CoordinateOnlyCancelSubmitPage(TakeoutCancelOrderMixin):
 class PendingMerchantCancelDriver:
     contexts = ["NATIVE_APP"]
     current_context = "NATIVE_APP"
-    page_source = "订单已提交取消申请，需要商家同意或自动关闭"
+    page_source = "取消申请已提交，待商家处理"
 
     def find_elements(self, by, selector):
         return []
@@ -283,7 +283,7 @@ class PendingMerchantCancelPage(TakeoutCancelOrderMixin):
         return 1080, 2270
 
     def _cancel_order_entry_still_visible(self):
-        return True
+        return False
 
 
 class ProgressDetailCancelDriver:
@@ -301,6 +301,166 @@ class ProgressDetailCancelPage(TakeoutCancelOrderMixin):
     def __init__(self) -> None:
         self.driver = ProgressDetailCancelDriver()
 
+    def _window_size_safe(self):
+        return 1080, 2270
+
+    def _cancel_order_entry_still_visible(self):
+        return False
+
+
+class ActiveOrderProgressDetailPage(ProgressDetailCancelPage):
+    def _cancel_order_entry_still_visible(self):
+        return True
+
+
+class OrdinaryOrderProgressDriver(ProgressDetailCancelDriver):
+    page_source = "订单详情 订单进度详情"
+
+    def find_elements(self, by, selector):
+        if "订单进度详情" in selector and "查看订单进度详情" not in selector:
+            return [FakeElement("订单进度详情")]
+        return []
+
+
+class OrdinaryOrderProgressPage(ProgressDetailCancelPage):
+    def __init__(self) -> None:
+        self.driver = OrdinaryOrderProgressDriver()
+
+
+class ExtendedProgressLabelDriver(ProgressDetailCancelDriver):
+    page_source = "订单详情 查看订单进度详情说明"
+
+    def find_elements(self, by, selector):
+        if "contains" in selector and "查看订单进度详情" in selector:
+            return [FakeElement("查看订单进度详情说明")]
+        return []
+
+
+class ExtendedProgressLabelPage(ProgressDetailCancelPage):
+    def __init__(self) -> None:
+        self.driver = ExtendedProgressLabelDriver()
+
+
+class MerchantExplanationCancelDriver(PendingMerchantCancelDriver):
+    page_source = "取消说明：提交取消后将待商家处理"
+
+    def find_elements(self, by, selector):
+        if "contains" in selector and "待商家处理" in selector:
+            return [FakeElement("取消说明：提交取消后将待商家处理")]
+        return []
+
+
+class MerchantExplanationCancelPage(PendingMerchantCancelPage):
+    def __init__(self) -> None:
+        self.driver = MerchantExplanationCancelDriver()
+
+    def _cancel_order_entry_still_visible(self):
+        return False
+
+
+class MissingCancelActionWithoutStatusDriver(PendingMerchantCancelDriver):
+    page_source = "订单详情"
+
+
+class MissingCancelActionWithoutStatusPage(PendingMerchantCancelPage):
+    def __init__(self) -> None:
+        self.driver = MissingCancelActionWithoutStatusDriver()
+
+
+class FailingNativeRestoreSwitch:
+    def __init__(self, driver) -> None:
+        self.driver = driver
+
+    def context(self, context_name):
+        if context_name == "NATIVE_APP" and self.driver.current_context != "NATIVE_APP":
+            raise RuntimeError("native restore unavailable")
+        self.driver.current_context = context_name
+
+
+class WebviewProgressCancelDriver:
+    contexts = ["NATIVE_APP", "WEBVIEW_takeout"]
+    current_context = "NATIVE_APP"
+    page_source = "订单详情"
+
+    def __init__(self) -> None:
+        self.switch_to = FailingNativeRestoreSwitch(self)
+
+    def find_elements(self, by, selector):
+        if self.current_context == "WEBVIEW_takeout" and "订单进度详情" in selector:
+            return [FakeElement("订单进度详情")]
+        return []
+
+
+class WebviewProgressCancelPage(TakeoutCancelOrderMixin):
+    def __init__(self) -> None:
+        self.driver = WebviewProgressCancelDriver()
+
+    def _cancel_order_entry_still_visible(self):
+        return False
+
+
+class SecondNativeRestoreFailsSwitch(FailingNativeRestoreSwitch):
+    def __init__(self, driver) -> None:
+        super().__init__(driver)
+        self.native_restore_count = 0
+
+    def context(self, context_name):
+        if context_name == "NATIVE_APP" and self.driver.current_context != "NATIVE_APP":
+            self.native_restore_count += 1
+            if self.native_restore_count >= 2:
+                raise RuntimeError("second native restore unavailable")
+        self.driver.current_context = context_name
+
+
+class LateRestoreFailureDriver(WebviewProgressCancelDriver):
+    def __init__(self) -> None:
+        self.switch_to = SecondNativeRestoreFailsSwitch(self)
+
+
+class LateRestoreFailurePage(TakeoutCancelOrderMixin):
+    def __init__(self) -> None:
+        self.driver = LateRestoreFailureDriver()
+
+    def _window_size_safe(self):
+        return 1080, 2270
+
+
+class CancelEntryQueryUnavailableDriver:
+    contexts = []
+    current_context = "WEBVIEW_takeout"
+    page_source = "订单详情"
+
+    def __init__(self) -> None:
+        self.switch_to = FailingNativeRestoreSwitch(self)
+
+
+class CancelEntryQueryUnavailablePage(TakeoutCancelOrderMixin):
+    def __init__(self) -> None:
+        self.driver = CancelEntryQueryUnavailableDriver()
+
+    def _window_size_safe(self):
+        return 1080, 2270
+
+
+class CancelContextQueryUnavailableDriver:
+    current_context = "NATIVE_APP"
+    page_source = "订单详情"
+
+    @property
+    def contexts(self):
+        raise RuntimeError("contexts unavailable")
+
+    def find_elements(self, by, selector):
+        return []
+
+
+class CancelContextQueryUnavailablePage(TakeoutCancelOrderMixin):
+    def __init__(self) -> None:
+        self.driver = CancelContextQueryUnavailableDriver()
+
+    def _window_size_safe(self):
+        return 1080, 2270
+
 
 def test_cancel_submit_uses_the_real_flutter_sheet_height_first(monkeypatch) -> None:
     monkeypatch.setattr("pages.takeout_cancel_order_mixin.time.sleep", lambda _: None)
@@ -317,11 +477,72 @@ def test_cancel_result_accepts_pending_merchant_confirmation(monkeypatch) -> Non
     assert page._wait_cancel_result_after_submit(timeout=1.0)
 
 
+def test_cancel_result_rejects_pending_merchant_explanation(monkeypatch) -> None:
+    monkeypatch.setattr("pages.takeout_cancel_order_mixin.time.sleep", lambda _: None)
+    page = MerchantExplanationCancelPage()
+
+    assert not page._wait_cancel_result_after_submit(timeout=0.01)
+
+
+def test_cancel_result_rejects_missing_action_without_explicit_status(monkeypatch) -> None:
+    monkeypatch.setattr("pages.takeout_cancel_order_mixin.time.sleep", lambda _: None)
+    page = MissingCancelActionWithoutStatusPage()
+
+    assert not page._wait_cancel_result_after_submit(timeout=0.01)
+
+
 def test_cancel_result_accepts_order_progress_detail_entry(monkeypatch) -> None:
     monkeypatch.setattr("pages.takeout_cancel_order_mixin.time.sleep", lambda _: None)
     page = ProgressDetailCancelPage()
 
     assert page._wait_cancel_result_after_submit(timeout=1.0)
+
+
+def test_cancel_result_rejects_progress_detail_while_cancel_action_is_visible(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr("pages.takeout_cancel_order_mixin.time.sleep", lambda _: None)
+    page = ActiveOrderProgressDetailPage()
+
+    assert not page._wait_cancel_result_after_submit(timeout=0.01)
+
+
+def test_cancel_result_rejects_generic_order_progress_label(monkeypatch) -> None:
+    monkeypatch.setattr("pages.takeout_cancel_order_mixin.time.sleep", lambda _: None)
+    page = OrdinaryOrderProgressPage()
+
+    assert not page._wait_cancel_result_after_submit(timeout=0.01)
+
+
+def test_cancel_result_requires_exact_progress_detail_label(monkeypatch) -> None:
+    monkeypatch.setattr("pages.takeout_cancel_order_mixin.time.sleep", lambda _: None)
+    page = ExtendedProgressLabelPage()
+
+    assert not page._wait_cancel_result_after_submit(timeout=0.01)
+
+
+def test_cancel_result_rejects_webview_progress_when_native_restore_fails() -> None:
+    page = WebviewProgressCancelPage()
+
+    assert not page._cancel_progress_detail_entry_visible()
+
+
+def test_cancel_result_rejects_progress_when_post_check_restore_fails() -> None:
+    page = LateRestoreFailurePage()
+
+    assert not page._cancel_progress_detail_entry_visible()
+
+
+def test_cancel_action_query_failure_is_not_treated_as_absent() -> None:
+    page = CancelEntryQueryUnavailablePage()
+
+    assert page._cancel_order_entry_still_visible()
+
+
+def test_cancel_context_query_failure_is_not_treated_as_absent() -> None:
+    page = CancelContextQueryUnavailablePage()
+
+    assert page._cancel_order_entry_still_visible()
 
 
 def test_address_selection_supports_an_optional_match_guard(monkeypatch) -> None:

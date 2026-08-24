@@ -776,94 +776,120 @@ class TakeoutCancelOrderMixin:
         w, h = self._window_size_safe()
         y_min, y_max = int(h * 0.18), int(h * 0.97)
         try:
-            if self._switch_context_safe("NATIVE_APP"):
-                for xp in _XPATH_NATIVE_CANCEL_ORDER:
-                    for el in self.driver.find_elements(AppiumBy.XPATH, xp):
-                        try:
-                            if not el.is_displayed():
-                                continue
-                            y = int(el.location.get("y", 0))
-                            if not (y_min <= y <= y_max):
-                                continue
-                            clickable = (
-                                (el.get_attribute("clickable") or "").lower() == "true"
-                            )
-                            tx = (el.get_attribute("text") or "").strip()
-                            cd = (el.get_attribute("content-desc") or "").strip()
-                            if clickable and ("取消订单" in tx or "取消订单" in cd):
-                                return True
-                            if tx == "取消订单" and len(cd) < 200:
-                                return True
-                        except WebDriverException as ex:
-                            if self._cancel_driver_query_unreliable(ex):
-                                logger.warning(
-                                    "检查取消入口时驱动不可用，不能判定入口已消失: %s",
-                                    ex,
-                                )
-                                return True
-                            continue
-                        except Exception:
-                            continue
-        except WebDriverException as ex:
-            if self._cancel_driver_query_unreliable(ex):
-                logger.warning("Native 检查取消入口失败，不能判定入口已消失: %s", ex)
+            if not self._switch_context_safe("NATIVE_APP"):
+                logger.warning("无法切换到 Native 检查取消入口，保守视为仍可取消")
                 return True
+            for xp in _XPATH_NATIVE_CANCEL_ORDER:
+                for el in self.driver.find_elements(AppiumBy.XPATH, xp):
+                    try:
+                        if not el.is_displayed():
+                            continue
+                        y = int(el.location.get("y", 0))
+                        if not (y_min <= y <= y_max):
+                            continue
+                        clickable = (
+                            (el.get_attribute("clickable") or "").lower() == "true"
+                        )
+                        tx = (el.get_attribute("text") or "").strip()
+                        cd = (el.get_attribute("content-desc") or "").strip()
+                        if clickable and ("取消订单" in tx or "取消订单" in cd):
+                            return True
+                        if tx == "取消订单" and len(cd) < 200:
+                            return True
+                    except WebDriverException as ex:
+                        logger.warning("检查 Native 取消入口失败，保守视为仍可取消: %s", ex)
+                        return True
+                    except Exception as ex:
+                        logger.debug("检查 Native 取消入口异常，保守视为仍可取消: %s", ex)
+                        return True
+        except WebDriverException as ex:
+            logger.warning("Native 检查取消入口失败，不能判定入口已消失: %s", ex)
+            return True
         except Exception as ex:
             logger.debug("Native 检查取消入口异常，保守视为仍需确认: %s", ex)
+            return True
+        try:
+            webview_contexts = [
+                c for c in (self.driver.contexts or []) if "WEBVIEW" in str(c).upper()
+            ]
+        except Exception as ex:
+            logger.debug("读取 WebView contexts 失败，保守视为仍可取消: %s", ex)
+            return True
+        for wctx in webview_contexts:
+            try:
+                if not self._switch_context_safe(wctx):
+                    logger.warning("无法切换到 %s 检查取消入口，保守视为仍可取消", wctx)
+                    return True
+                for xp in _WEB_XPATH_CANCEL_ORDER:
+                    for el in self.driver.find_elements(By.XPATH, xp):
+                        try:
+                            if el.is_displayed():
+                                self._switch_context_safe("NATIVE_APP")
+                                return True
+                        except WebDriverException as ex:
+                            logger.warning(
+                                "WebView 检查取消入口时驱动不可用，不能判定入口已消失: %s",
+                                ex,
+                            )
+                            self._switch_context_safe("NATIVE_APP")
+                            return True
+                        except Exception as ex:
+                            logger.debug(
+                                "检查 WebView 取消入口异常，保守视为仍可取消: %s",
+                                ex,
+                            )
+                            self._switch_context_safe("NATIVE_APP")
+                            return True
+            except WebDriverException as ex:
+                logger.warning("WebView 检查取消入口失败，不能判定入口已消失: %s", ex)
+                self._switch_context_safe("NATIVE_APP")
+                return True
+            except Exception as ex:
+                logger.debug("WebView 检查取消入口异常，保守视为仍可取消: %s", ex)
+                self._switch_context_safe("NATIVE_APP")
+                return True
+        if not self._switch_context_safe("NATIVE_APP"):
+            logger.warning("检查取消入口后无法恢复 Native，保守视为仍可取消")
+            return True
+        return False
+
+    def _cancel_progress_detail_entry_visible(self) -> bool:
+        """精确的「查看订单进度详情」入口表示本订单已有取消跟踪日志。"""
+        labels = ("查看订单进度详情",)
+        progress_visible = False
+        try:
+            if self._switch_context_safe("NATIVE_APP"):
+                for label in labels:
+                    for xp in (
+                        f'//*[normalize-space(@text)="{label}"]',
+                        f'//*[normalize-space(@content-desc)="{label}"]',
+                    ):
+                        for el in self.driver.find_elements(AppiumBy.XPATH, xp):
+                            if el.is_displayed():
+                                logger.info("取消结果命中订单进度详情入口（Native）: %s", label)
+                                progress_visible = True
+                                break
+                        if progress_visible:
+                            break
+                    if progress_visible:
+                        break
+        except Exception:
+            pass
+        if progress_visible:
+            cancel_entry_visible = self._cancel_order_entry_still_visible()
+            if not self._switch_context_safe("NATIVE_APP"):
+                logger.error("检查取消入口后无法恢复 NATIVE_APP，拒绝判定取消成功")
+                return False
+            if cancel_entry_visible:
+                logger.warning("订单进度详情可见，但取消订单入口仍可操作，拒绝判定取消成功")
+                return False
             return True
         for wctx in self._iter_webview_contexts():
             try:
                 if not self._switch_context_safe(wctx):
                     continue
-                for xp in _WEB_XPATH_CANCEL_ORDER:
-                    for el in self.driver.find_elements(By.XPATH, xp):
-                        try:
-                            if el.is_displayed():
-                                return True
-                        except WebDriverException as ex:
-                            if self._cancel_driver_query_unreliable(ex):
-                                logger.warning(
-                                    "WebView 检查取消入口时驱动不可用，不能判定入口已消失: %s",
-                                    ex,
-                                )
-                                self._switch_context_safe("NATIVE_APP")
-                                return True
-                            continue
-                        except Exception:
-                            continue
-            except WebDriverException as ex:
-                if self._cancel_driver_query_unreliable(ex):
-                    logger.warning("WebView 检查取消入口失败，不能判定入口已消失: %s", ex)
-                    self._switch_context_safe("NATIVE_APP")
-                    return True
-                continue
-            except Exception:
-                continue
-        self._switch_context_safe("NATIVE_APP")
-        return False
-
-    def _cancel_progress_detail_entry_visible(self) -> bool:
-        """提交取消后，订单页出现进度详情入口即视为申请已受理。"""
-        labels = ("查看订单进度详情", "订单进度详情", "查看订单进度")
-        try:
-            if self._switch_context_safe("NATIVE_APP"):
                 for label in labels:
-                    for xp in (
-                        f'//*[contains(@text,"{label}")]',
-                        f'//*[contains(@content-desc,"{label}")]',
-                    ):
-                        for el in self.driver.find_elements(AppiumBy.XPATH, xp):
-                            if el.is_displayed():
-                                logger.info("取消结果命中订单进度详情入口（Native）: %s", label)
-                                return True
-        except Exception:
-            pass
-        for wctx in self._iter_webview_contexts():
-            try:
-                if not self._switch_context_safe(wctx):
-                    continue
-                for label in labels:
-                    xp = f"//*[contains(normalize-space(string(.)),'{label}')]"
+                    xp = f'//*[normalize-space(string(.))="{label}"]'
                     for el in self.driver.find_elements(By.XPATH, xp):
                         if el.is_displayed():
                             logger.info(
@@ -871,7 +897,22 @@ class TakeoutCancelOrderMixin:
                                 wctx,
                                 label,
                             )
-                            self._switch_context_safe("NATIVE_APP")
+                            if not self._switch_context_safe("NATIVE_APP"):
+                                logger.error(
+                                    "取消结果已命中，但无法恢复 NATIVE_APP，拒绝判定取消成功"
+                                )
+                                return False
+                            cancel_entry_visible = self._cancel_order_entry_still_visible()
+                            if not self._switch_context_safe("NATIVE_APP"):
+                                logger.error(
+                                    "检查取消入口后无法恢复 NATIVE_APP，拒绝判定取消成功"
+                                )
+                                return False
+                            if cancel_entry_visible:
+                                logger.warning(
+                                    "订单进度详情可见，但取消订单入口仍可操作，拒绝判定取消成功"
+                                )
+                                return False
                             return True
             except Exception:
                 continue
@@ -882,32 +923,20 @@ class TakeoutCancelOrderMixin:
     def _wait_cancel_result_after_submit(self, timeout: float = 12.0) -> bool:
         """
         提交取消后等待结果：
-        - 命中「已取消/取消成功」等成功信号 -> True
-        - 或「取消订单」入口消失 -> True
-        - 超时仍可见取消入口 -> False
+        - 命中明确取消状态，且「取消订单」入口不可操作 -> True
+        - 只有入口消失或解释性文案 -> False
         """
         ok_words = (
-            "已取消",
-            "取消成功",
             "订单已取消",
+            "取消成功",
             "已申请取消",
-            "取消中",
-            "取消申请",
-            "已发起取消",
-            "申请成功",
-            "提交成功",
-            "退款",
-            "已受理",
-            "正在处理",
-            "商家已收到",
-            "待退款",
-            "退款中",
+            "取消申请已提交",
+            "订单已提交取消申请",
+            "成功发起取消",
+            "待商家处理",
+            "退款处理中",
             "订单关闭",
             "交易关闭",
-            "已关闭",
-            "作废",
-            "待商家",
-            "商家处理",
         )
         # page_source 用较长短语，降低误命中隐私/帮助长文
         ok_phrases_page_src = (
@@ -915,33 +944,38 @@ class TakeoutCancelOrderMixin:
             "取消成功",
             "已申请取消",
             "取消申请已提交",
-            "取消申请",
+            "订单已提交取消申请",
             "成功发起取消",
             "您的订单已取消",
-            "待商家处理",
-            "商家同意",
-            "需要商家同意或自动关闭",
             "退款处理中",
         )
         end = time.time() + timeout
         it = 0
-        cancel_entry_absent_count = 0
         while time.time() < end:
             it += 1
             if self._cancel_progress_detail_entry_visible():
-                self._switch_context_safe("NATIVE_APP")
+                if not self._switch_context_safe("NATIVE_APP"):
+                    logger.error("取消结果已确认，但无法恢复 NATIVE_APP")
+                    return False
                 return True
             try:
                 if self._switch_context_safe("NATIVE_APP"):
                     self._tap_native_dismiss_blocking_sheet()
                     for wd in ok_words:
                         for xp in (
-                            f'//*[contains(@text,"{wd}")]',
-                            f'//*[contains(@content-desc,"{wd}")]',
+                            f'//*[normalize-space(@text)="{wd}"]',
+                            f'//*[normalize-space(@content-desc)="{wd}"]',
                         ):
                             for el in self.driver.find_elements(AppiumBy.XPATH, xp):
                                 try:
                                     if el.is_displayed():
+                                        cancel_entry_visible = (
+                                            self._cancel_order_entry_still_visible()
+                                        )
+                                        if not self._switch_context_safe("NATIVE_APP"):
+                                            return False
+                                        if cancel_entry_visible:
+                                            continue
                                         logger.info("取消结果命中成功文案（Native）: %s", wd)
                                         return True
                                 except Exception:
@@ -953,43 +987,44 @@ class TakeoutCancelOrderMixin:
                     if not self._switch_context_safe(wctx):
                         continue
                     for wd in ok_words:
-                        xp = f"//*[contains(normalize-space(string(.)),'{wd}')]"
+                        xp = f'//*[normalize-space(string(.))="{wd}"]'
                         for el in self.driver.find_elements(By.XPATH, xp):
                             try:
                                 if el.is_displayed():
+                                    if not self._switch_context_safe("NATIVE_APP"):
+                                        return False
+                                    cancel_entry_visible = (
+                                        self._cancel_order_entry_still_visible()
+                                    )
+                                    if not self._switch_context_safe("NATIVE_APP"):
+                                        return False
+                                    if cancel_entry_visible:
+                                        continue
                                     logger.info(
                                         "取消结果命中成功文案（WebView %s）: %s",
                                         wctx,
                                         wd,
                                     )
-                                    self._switch_context_safe("NATIVE_APP")
                                     return True
                             except Exception:
                                 continue
                 except Exception:
                     continue
-            if not self._cancel_order_entry_still_visible():
-                cancel_entry_absent_count += 1
-                logger.info(
-                    "取消结果校验：第 %d 次未见「取消订单」入口，继续确认",
-                    cancel_entry_absent_count,
-                )
-                if cancel_entry_absent_count >= 3:
-                    self._switch_context_safe("NATIVE_APP")
-                    return True
-            else:
-                cancel_entry_absent_count = 0
             if it % 7 == 0:
                 try:
                     src = (self.driver.page_source or "")
                     low = src.lower()
                     for ph in ok_phrases_page_src:
                         if ph.lower() in low:
+                            cancel_entry_visible = self._cancel_order_entry_still_visible()
+                            if not self._switch_context_safe("NATIVE_APP"):
+                                return False
+                            if cancel_entry_visible:
+                                continue
                             logger.info(
                                 "取消结果命中（page_source 短语）: %s",
                                 ph,
                             )
-                            self._switch_context_safe("NATIVE_APP")
                             return True
                 except Exception:
                     pass
@@ -1016,7 +1051,7 @@ class TakeoutCancelOrderMixin:
                 time.sleep(0.55)
             time.sleep(0.45)
         self._switch_context_safe("NATIVE_APP")
-        logger.error("取消结果校验失败：超时仍未见成功文案，且「取消订单」入口仍存在")
+        logger.error("取消结果校验失败：未同时确认明确取消状态与不可操作的取消入口")
         return False
     
 
