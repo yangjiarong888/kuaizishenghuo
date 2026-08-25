@@ -334,9 +334,13 @@ class TakeoutCancelOrderMixin:
             pass
         # 坐标兜底：按取消原因弹层实际主按钮高度点，避免点到弹层下方。
         for xf, yf in (
+            # 2026-08 真机 1080×2400：按钮范围 y=1544..1636，中心约 0.66h。
             (0.50, 0.66),
             (0.48, 0.66),
             (0.52, 0.66),
+            (0.50, 0.72),
+            (0.48, 0.72),
+            (0.52, 0.72),
             (0.50, 0.73),
             (0.50, 0.745),
             (0.50, 0.76),
@@ -676,7 +680,10 @@ class TakeoutCancelOrderMixin:
             # 最后兜底：该弹窗是 Native 单选列表（右侧圆圈），文本节点偶发不可取。
             # 对「收货信息填错了」按第 3 行点位尝试（文字区 + 右侧单选区）。
             # 与常见「取消订单」弹窗 7 项列表一致：第 3 项「收货信息填错了」约在屏高中部略上
-            if "收货信息" in reason or "填错" in reason:
+            if "点多了" in reason or "点错了" in reason or "点少了" in reason:
+                # 真机原因面板中的第一项。
+                row_y = (0.408, 0.42, 0.40, 0.44)
+            elif "收货信息" in reason or "填错" in reason:
                 row_y = (
                     0.413,
                     0.48,
@@ -695,7 +702,8 @@ class TakeoutCancelOrderMixin:
             # 勿在「文字区 + 提交失败」时 break 整组：Flutter 单选常须点右侧圆圈才生效，
             # 须继续尝试同 row 的「单选区」及下一组 row_y。
             for yf in row_y:
-                for xf, tag in ((0.36, "文字区"), (0.86, "单选区"), (0.78, "单选区内侧")):
+                # Flutter 画布中行文案区域不一定响应，优先点右侧圆圈。
+                for xf, tag in ((0.824, "单选圆心"), (0.82, "单选区内侧"), (0.36, "文字区")):
                     cx, cy = int(w * xf), int(h * yf)
                     try:
                         self.driver.execute_script(
@@ -855,8 +863,9 @@ class TakeoutCancelOrderMixin:
 
     def _cancel_progress_detail_entry_visible(self) -> bool:
         """精确的「查看订单进度详情」入口表示本订单已有取消跟踪日志。"""
-        labels = ("查看订单进度详情",)
+        labels = ("查看进度详情", "查看订单进度详情")
         progress_visible = False
+        progress_label = ""
         try:
             if self._switch_context_safe("NATIVE_APP"):
                 for label in labels:
@@ -868,6 +877,7 @@ class TakeoutCancelOrderMixin:
                             if el.is_displayed():
                                 logger.info("取消结果命中订单进度详情入口（Native）: %s", label)
                                 progress_visible = True
+                                progress_label = label
                                 break
                         if progress_visible:
                             break
@@ -883,7 +893,36 @@ class TakeoutCancelOrderMixin:
             if cancel_entry_visible:
                 logger.warning("订单进度详情可见，但取消订单入口仍可操作，拒绝判定取消成功")
                 return False
-            return True
+            for xp in (
+                f'//*[normalize-space(@text)="{progress_label}"]',
+                f'//*[normalize-space(@content-desc)="{progress_label}"]',
+            ):
+                for el in self.driver.find_elements(AppiumBy.XPATH, xp):
+                    try:
+                        if not el.is_displayed():
+                            continue
+                        el.click()
+                        time.sleep(0.6)
+                        src = self.driver.page_source or ""
+                        if "申请取消订单" in src:
+                            logger.info("取消结果已在订单跟踪中确认：申请取消订单")
+                            return True
+                        for status_xp in (
+                            '//*[normalize-space(@text)="申请取消订单"]',
+                            '//*[normalize-space(@content-desc)="申请取消订单"]',
+                        ):
+                            for status_el in self.driver.find_elements(
+                                AppiumBy.XPATH, status_xp
+                            ):
+                                if status_el.is_displayed():
+                                    logger.info(
+                                        "取消结果已在订单跟踪中确认：申请取消订单"
+                                    )
+                                    return True
+                    except Exception as ex:
+                        logger.debug("打开并核验订单跟踪失败: %s", ex)
+            logger.warning("订单进度详情可见，但未核验到“申请取消订单”记录")
+            return False
         for wctx in self._iter_webview_contexts():
             try:
                 if not self._switch_context_safe(wctx):
@@ -928,6 +967,7 @@ class TakeoutCancelOrderMixin:
         """
         ok_words = (
             "订单已取消",
+            "订单已关闭",
             "取消成功",
             "已申请取消",
             "取消申请已提交",
@@ -941,6 +981,7 @@ class TakeoutCancelOrderMixin:
         # page_source 用较长短语，降低误命中隐私/帮助长文
         ok_phrases_page_src = (
             "订单已取消",
+            "订单已关闭",
             "取消成功",
             "已申请取消",
             "取消申请已提交",
@@ -1055,6 +1096,75 @@ class TakeoutCancelOrderMixin:
         return False
     
 
+    def _native_canvas_order_detail_ready(self) -> bool:
+        """订单详情已渲染，但页面没有暴露可定位的 WebView/取消语义节点。"""
+        try:
+            if not self._switch_context_safe("NATIVE_APP"):
+                return False
+            contexts = list(self.driver.contexts or [])
+            if any("WEBVIEW" in str(ctx).upper() for ctx in contexts):
+                return False
+            src = self.driver.page_source or ""
+            return "订单详情" in src
+        except Exception:
+            return False
+
+    def _tap_native_canvas_cancel_order_entry(self) -> bool:
+        """仅在已确认的画布式订单详情页点击固定的取消入口并校验确认弹窗。"""
+        if not self._native_canvas_order_detail_ready():
+            return False
+        w, h = self._window_size_safe()
+        # 操作区依次为联系商家/催单/取消订单；取消入口在第三列，约 0.60w、0.32h。
+        for xf, yf in ((0.60, 0.32), (0.60, 0.30), (0.58, 0.32)):
+            cx, cy = int(w * xf), int(h * yf)
+            try:
+                self.driver.execute_script(
+                    "mobile: clickGesture",
+                    {"x": cx, "y": cy},
+                )
+                time.sleep(0.8)
+                src = self.driver.page_source or ""
+                if "您确定取消该订单" in src or (
+                    "确定取消" in src and "点错了" in src
+                ):
+                    logger.info(
+                        "画布订单详情：已点击取消入口 (%d,%d) 并检测到确认弹窗",
+                        cx,
+                        cy,
+                    )
+                    return True
+            except Exception as ex:
+                logger.debug("画布订单详情取消入口点击失败: %s", ex)
+        logger.error("画布订单详情坐标点击后未检测到取消确认弹窗")
+        return False
+
+    def _tap_native_canvas_confirm_cancel(self) -> bool:
+        """确认弹窗没有独立语义节点时，受弹窗文案保护后点击左侧「确定取消」。"""
+        try:
+            src = self.driver.page_source or ""
+        except Exception:
+            return False
+        if not (
+            "您确定取消该订单" in src
+            or ("确定取消" in src and "点错了" in src)
+        ):
+            return False
+        w, h = self._window_size_safe()
+        for xf, yf in ((0.31, 0.57), (0.31, 0.55), (0.30, 0.58)):
+            cx, cy = int(w * xf), int(h * yf)
+            try:
+                self.driver.execute_script(
+                    "mobile: clickGesture", {"x": cx, "y": cy}
+                )
+                time.sleep(0.7)
+                new_src = self.driver.page_source or ""
+                if "您确定取消该订单" not in new_src:
+                    logger.info("画布确认弹窗：已点「确定取消」(%d,%d)", cx, cy)
+                    return True
+            except Exception:
+                continue
+        return False
+
     def shop_assert_order_detail_cancel_visible(self, timeout: float = 25.0) -> bool:
         self._last_order_detail_context = None
         end = time.time() + timeout
@@ -1088,7 +1198,12 @@ class TakeoutCancelOrderMixin:
                                 continue
                 except Exception:
                     continue
-    
+
+            if self._native_canvas_order_detail_ready():
+                self._last_order_detail_context = "NATIVE_CANVAS"
+                logger.info("断言成功：画布式订单详情已就绪，启用受保护的取消入口回退")
+                return True
+
             time.sleep(0.45)
     
         try:
@@ -1119,6 +1234,13 @@ class TakeoutCancelOrderMixin:
                         clicked = True
                         break
             self._switch_context_safe("NATIVE_APP")
+
+        if not clicked and saved == "NATIVE_CANVAS":
+            clicked = self._tap_native_canvas_cancel_order_entry()
+
+        if not clicked:
+            logger.error("取消流程失败：未点击到取消订单入口")
+            return False
     
         time.sleep(0.9)
     
@@ -1136,12 +1258,19 @@ class TakeoutCancelOrderMixin:
                         logger.info("已点「确定取消」（WebView %s）", wctx)
                         break
             self._switch_context_safe("NATIVE_APP")
+
+        if not ok_confirm and saved == "NATIVE_CANVAS":
+            ok_confirm = self._tap_native_canvas_confirm_cancel()
+
+        if not ok_confirm:
+            logger.error("取消流程失败：未点击到确定取消")
+            return False
     
         time.sleep(0.9)
     
         time.sleep(0.65)
         self._log_contexts("提交前")
-        submit_ok = self._choose_cancel_reason_then_submit("收货信息填错了")
+        submit_ok = self._choose_cancel_reason_then_submit("点多了/点错了/点少了")
         if not submit_ok:
             logger.error("取消订单未完成：未点到「提交」，请检查 H5/Native 提交按钮")
             self._switch_context_safe("NATIVE_APP")

@@ -256,6 +256,46 @@ class TakeoutPageBase(TakeoutShopMixin):
         needles = ("购物车", "去结算", "起送", "配送费", "选规格", "加入购物车")
         return any(n in src for n in needles)
 
+    def _looks_inside_takeout_address_flow(self) -> bool:
+        """Recognize nested address pages where bottom-tab coordinate taps are unsafe."""
+        try:
+            src = self.driver.page_source or ""
+        except Exception:
+            return False
+        strong = (
+            "新增收货地址",
+            "定位地址",
+            "联系人电话",
+            "地址图片",
+            "请输入手机号",
+        )
+        if any(marker in src for marker in strong):
+            return True
+        if "温馨提示" in src and "上传图片" in src:
+            return True
+        return "配送至" in src and "新增地址" in src
+
+    def _recover_from_takeout_address_flow(self, max_backs: int = 5) -> bool:
+        try:
+            self.driver.hide_keyboard()
+            logger.info("地址流程恢复：已先收起输入法")
+        except Exception:
+            pass
+        for index in range(max_backs):
+            if self.is_on_takeout_merchant_home():
+                return True
+            try:
+                self.driver.back()
+                logger.info("地址流程恢复：返回上一层（第 %d 次）", index + 1)
+            except Exception as exc:
+                logger.warning("地址流程恢复返回失败: %s", type(exc).__name__)
+                return False
+            time.sleep(0.6)
+            if self.is_on_takeout_merchant_home():
+                logger.info("地址流程恢复：已回到外卖商家列表")
+                return True
+        return False
+
     def ensure_takeout_tab(
         self,
         settle_sec: float = 1.2,
@@ -279,6 +319,14 @@ class TakeoutPageBase(TakeoutShopMixin):
                 logger.error("检测外卖首页失败（UiAutomator2 不可用）：%s", ex)
                 return False
             raise
+
+        if self._looks_inside_takeout_address_flow():
+            logger.info("当前位于新增/定位地址流程，先收键盘并逐层返回")
+            if self._recover_from_takeout_address_flow():
+                return True
+            if self._looks_inside_takeout_address_flow():
+                logger.error("地址流程恢复失败，拒绝使用底栏坐标兜底以免误触表单")
+                return False
 
         if self._looks_inside_takeout_shop():
             logger.info("当前像店铺详情/购物车页，先返回外卖商家列表")
@@ -419,27 +467,98 @@ class TakeoutPageBase(TakeoutShopMixin):
         )
         return any(n in src for n in needles)
 
-    def _dismiss_location_permission_prompt_if_present(self) -> bool:
-        """Dismiss the in-app location prompt without changing OS permissions."""
-        try:
-            src = self.driver.page_source or ""
-        except Exception:
-            return False
-        if "定位权限未开启" not in src:
-            return False
-        for pkg in _PACKAGES:
+    def _tap_location_permission_label(self, labels: Sequence[str]) -> bool:
+        for label in labels:
+            safe = label.replace('"', "")
+            xp = (
+                f'//*[@text="{safe}" or @content-desc="{safe}"]'
+            )
             try:
-                for element in self.driver.find_elements(
-                    AppiumBy.ID, f"{pkg}:id/tv_cancel"
-                ):
-                    if element.is_displayed():
-                        element.click()
-                        logger.info("已取消定位权限提示，继续使用手动城市选择")
-                        time.sleep(0.6)
-                        return True
+                for element in self.driver.find_elements(AppiumBy.XPATH, xp):
+                    if not element.is_displayed():
+                        continue
+                    element.click()
+                    logger.info("定位授权流程已点击「%s」", label)
+                    time.sleep(0.6)
+                    return True
             except Exception:
                 continue
-        logger.error("定位权限提示可见，但未找到安全取消按钮")
+        return False
+
+    def _return_to_app_after_location_permission(self) -> None:
+        for _ in range(3):
+            try:
+                if self.driver.current_package in _PACKAGES:
+                    return
+            except Exception:
+                break
+            try:
+                self.driver.back()
+                time.sleep(0.5)
+            except Exception:
+                break
+        try:
+            self.driver.activate_app(_PACKAGES[0])
+            time.sleep(0.8)
+        except Exception:
+            pass
+
+    def _ensure_location_permission_enabled(self) -> bool:
+        """Grant precise foreground location via runtime dialog or app settings."""
+        acted = False
+        permission_needles = (
+            "定位权限未开启",
+            "请前往设置中心打开定位权限",
+            "获取位置信息",
+            "精确位置",
+            "仅在使用中允许",
+            "使用应用时允许",
+            "本次运行允许",
+            "应用权限",
+        )
+        for _ in range(12):
+            try:
+                src = self.driver.page_source or ""
+            except Exception:
+                src = ""
+            if not any(needle in src for needle in permission_needles):
+                if acted:
+                    self._return_to_app_after_location_permission()
+                    logger.info("定位权限流程完成")
+                return True
+            if (
+                "请前往设置中心打开定位权限" in src
+                or "定位权限未开启" in src
+            ) and self._tap_location_permission_label(
+                ("立即开启", "确定", "去设置", "前往设置")
+            ):
+                acted = True
+                continue
+            if "应用权限" in src and self._tap_location_permission_label(
+                ("应用权限", "权限")
+            ):
+                acted = True
+                continue
+            if (
+                "位置信息" in src
+                and "仅在使用中允许" not in src
+                and self._tap_location_permission_label(("位置信息", "位置"))
+            ):
+                acted = True
+                continue
+            if "精确位置" in src:
+                if self._tap_location_permission_label(("精确位置",)):
+                    acted = True
+            if self._tap_location_permission_label(
+                ("仅在使用中允许", "使用应用时允许")
+            ):
+                acted = True
+                self._return_to_app_after_location_permission()
+                logger.info("已开启精确的使用中定位权限")
+                return True
+            # 不选择“一次性允许”；自动化回归需要后续会话仍可使用定位。
+            time.sleep(0.4)
+        logger.error("定位权限提示存在，但未能完成精确的使用中授权")
         return False
 
     def _click_manila_hot_city(self) -> bool:
@@ -557,7 +676,9 @@ class TakeoutPageBase(TakeoutShopMixin):
             return False
 
         time.sleep(0.9)
-        self._dismiss_location_permission_prompt_if_present()
+        if not self._ensure_location_permission_enabled():
+            logger.error("定位权限未开启，终止城市选择")
+            return False
         if not self._address_selection_screen_visible():
             time.sleep(1.2)
 

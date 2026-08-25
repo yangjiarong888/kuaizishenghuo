@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import html
+import inspect
 import math
 import random
 import re
@@ -16,6 +17,11 @@ from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.common.by import By
 
 from commons.logger import setup_logger
+from pages.takeout_address import (
+    TakeoutAddressData,
+    TakeoutAddressPolicy,
+)
+from pages.shipping_types import xpath_literal
 from pages.takeout_locators import (
     _WEB_REASON_FRAGMENTS,
     _WEB_XPATH_CANCEL_ORDER,
@@ -307,6 +313,69 @@ class TakeoutCheckoutMixin(
                 logger.info("已宽匹配点到分类「%s」", category_desc)
                 time.sleep(0.45)
                 return True
+        return False
+
+    def _try_tap_sidebar_category_from_page_source(
+        self, category_desc: str, screen_w: int, h: int
+    ) -> bool:
+        """从单次 UI XML 快照找左栏分类，避免未命中 XPath/UiA 查询阻塞。"""
+        try:
+            src = self.driver.page_source or ""
+        except Exception as ex:
+            logger.debug("读取分类页 UI XML 失败: %s", ex)
+            return False
+        target = re.sub(r"\s+", "", (category_desc or "").strip())
+        if not target:
+            return False
+        y_min = int(h * 0.06)
+        for tag in re.findall(r"<[^>]+>", src):
+            desc_match = re.search(r'\bcontent-desc="([^"]*)"', tag)
+            text_match = re.search(r'\btext="([^"]*)"', tag)
+            blob = html.unescape(
+                " ".join(
+                    part.group(1)
+                    for part in (desc_match, text_match)
+                    if part is not None
+                )
+            )
+            compact_blob = re.sub(r"\s+", "", blob)
+            matched = target in compact_blob
+            if "健康" in category_desc and "粮油" in category_desc:
+                matched = matched or "粮油" in compact_blob
+            if not matched:
+                continue
+            bounds = re.search(
+                r'\bbounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', tag
+            )
+            if not bounds:
+                continue
+            x1, y1, x2, y2 = (int(v) for v in bounds.groups())
+            if x2 <= x1 or y2 <= y1 or y1 < y_min:
+                continue
+            width = x2 - x1
+            if width <= int(screen_w * 0.48):
+                cx = x1 + width // 2
+                if cx > int(screen_w * 0.54):
+                    continue
+            else:
+                if x1 > int(screen_w * 0.12):
+                    continue
+                cx = x1 + min(int(width * 0.20), int(screen_w * 0.18))
+            cy = y1 + (y2 - y1) // 2
+            try:
+                self.driver.execute_script(
+                    "mobile: clickGesture", {"x": cx, "y": cy}
+                )
+                logger.info(
+                    "已从 UI XML 点击侧栏分类「%s」(%d,%d)",
+                    category_desc,
+                    cx,
+                    cy,
+                )
+                time.sleep(0.45)
+                return True
+            except Exception as ex:
+                logger.debug("点击 UI XML 分类节点失败: %s", ex)
         return False
     
 
@@ -967,29 +1036,11 @@ class TakeoutCheckoutMixin(
             max_steps,
             category_desc,
         )
-        if self._try_tap_sidebar_category_loose_xpath(category_desc, w, h):
+        if self._try_tap_sidebar_category_from_page_source(category_desc, w, h):
             return True
         for step in range(max_steps):
-            if self._try_sidebar_category_ultralight(
-                category_desc, w, h
-            ):
+            if self._try_tap_sidebar_category_from_page_source(category_desc, w, h):
                 return True
-            if self._try_tap_left_rail_uia_needle(category_desc, w, h):
-                return True
-            if step % 5 == 0:
-                if self._try_tap_sidebar_category_loose_xpath(
-                    category_desc, w, h
-                ):
-                    return True
-                if step > 0 and step % 10 == 0:
-                    self._uia_scroll_sidebar_scroll_into_view(
-                        category_desc, max_swipes=5
-                    )
-                    time.sleep(0.2)
-                    if self._try_tap_sidebar_category_loose_xpath(
-                        category_desc, w, h
-                    ):
-                        return True
             if step > 0 and step % 4 == 0:
                 logger.info(
                     "左侧快路径：已沿侧栏下滚 %d/%d 步，仍未点到「%s」",
@@ -1000,10 +1051,6 @@ class TakeoutCheckoutMixin(
             self._scroll_shop_category_sidebar_once(
                 w, h, step, aggressive=(step < 18)
             )
-            if step >= 10:
-                self._scroll_shop_category_sidebar_once(
-                    w, h, step + 7, aggressive=True
-                )
             time.sleep(0.1)
         return False
     
@@ -1012,10 +1059,8 @@ class TakeoutCheckoutMixin(
         """App 侧栏文案常与脚本里写的略不一致，自动追加一批近义关键词。"""
         out: List[str] = []
         if "健康" in category_desc and "粮油" in category_desc:
-            # 只保留少数近义，避免「主名失败后」再各跑一遍 24 轮深搜导致总耗时可数十分钟
-            for a in ("米面粮油", "粮油调味", "粮油"):
-                if a != category_desc.strip() and a not in out:
-                    out.append(a)
+            # 单次侧栏扫描已把「粮油」作为窄匹配词；不要再为近义词重复整轮滚动。
+            return out
         if "招牌" in category_desc:
             for a in ("本店招牌", "店铺招牌"):
                 if a != category_desc.strip() and a not in out:
@@ -1149,128 +1194,19 @@ class TakeoutCheckoutMixin(
         self._reset_shop_category_sidebar_to_top(w, h, category_desc)
         if self._try_tap_exact_sidebar_view_if_visible(category_desc, w):
             return True
-        if self._try_sidebar_scrollview_scroll_into_then_tap(
-            category_desc, w, h, max_swipes=8, max_instances=5
-        ):
-            return True
-    
         left_max_x = max(260, int(w * 0.44))
-        max_rounds = 14 if deep else 0
-    
-        if self._try_tap_left_rail_uia_needle(category_desc, w, h):
-            return True
-        if self._try_tap_sidebar_category_loose_xpath(
-            category_desc, w, h
-        ):
-            return True
-    
         if self._left_sidebar_quick_scan_for_category(
             category_desc,
             left_max_x,
             w,
             h,
-            max_steps=16 if deep else 10,
+            max_steps=12 if deep else 8,
         ):
             return True
-    
-        if not deep:
-            logger.info(
-                "侧栏关键词「%s」：轻量尝试未命中，跳过全树搜集与多轮滚动（避免长时间占用）",
-                category_desc,
-            )
-            return False
-    
-        logger.info("左侧快路径未命中，进行全树搜集（较慢）…")
-        if self._try_activate_sidebar_category(
+        logger.info(
+            "侧栏固定扫描未命中「%s」，停止查找以避免长时间阻塞",
             category_desc,
-            left_max_x,
-            w,
-            with_xpath=True,
-            use_full_gather=True,
-        ):
-            return True
-        self._uia_scroll_sidebar_scroll_into_view(category_desc)
-        if self._try_tap_left_rail_uia_needle(category_desc, w, h):
-            return True
-        if self._try_tap_sidebar_category_loose_xpath(category_desc, w, h):
-            return True
-        if self._try_activate_sidebar_category(
-            category_desc,
-            left_max_x,
-            w,
-            with_xpath=True,
-            use_full_gather=True,
-        ):
-            return True
-    
-        for round_i in range(max_rounds):
-            aggressive = round_i < 10
-            if round_i % 3 == 0:
-                logger.info(
-                    "侧栏寻找「%s」：左条滚动 %d/%d（%s）…",
-                    category_desc,
-                    round_i + 1,
-                    max_rounds,
-                    "大步" if aggressive else "细调",
-                )
-            if round_i % 6 == 0:
-                self._scroll_vertical_list_widget_forward_once()
-            if round_i >= 5:
-                self._scroll_sidebar_scrollview_forward_once()
-            self._scroll_shop_category_sidebar_once(
-                w, h, round_i, aggressive=aggressive
-            )
-            time.sleep(0.12)
-            if round_i % 6 == 0:
-                self._uia_scroll_into_exact_category_desc(category_desc)
-                time.sleep(0.18)
-            if round_i % 4 == 0:
-                if self._try_sidebar_scrollview_scroll_into_then_tap(
-                    category_desc,
-                    w,
-                    h,
-                    max_swipes=5,
-                    max_instances=3,
-                ):
-                    return True
-            heavy = round_i % 2 == 0
-            if self._try_tap_left_rail_uia_needle(category_desc, w, h):
-                return True
-            if self._try_activate_sidebar_category(
-                category_desc,
-                left_max_x,
-                w,
-                with_xpath=True,
-                use_full_gather=heavy,
-            ):
-                return True
-            if self._try_tap_sidebar_category_loose_xpath(
-                category_desc, w, h
-            ):
-                return True
-    
-        for last_i in range(8):
-            if last_i % 2 == 0 and self._try_sidebar_scrollview_scroll_into_then_tap(
-                category_desc,
-                w,
-                h,
-                max_swipes=5,
-                max_instances=3,
-            ):
-                return True
-            if self._try_tap_left_rail_uia_needle(category_desc, w, h):
-                return True
-            if self._try_tap_sidebar_category_loose_xpath(
-                category_desc, w, h
-            ):
-                return True
-            self._scroll_shop_category_sidebar_once(
-                w, h, last_i + 30, aggressive=True
-            )
-            self._scroll_vertical_list_widget_forward_once()
-            time.sleep(0.14)
-    
-        logger.info("本关键词「%s」仍未点到分类", category_desc)
+        )
         return False
     
 
@@ -1864,6 +1800,92 @@ class TakeoutCheckoutMixin(
         return False
     
 
+    @staticmethod
+    def _cart_item_count_from_label(label: str) -> Optional[int]:
+        """Read an explicit cart count without treating prices as quantities."""
+        normalized = html.unescape(label or "").replace("，", ",")
+        for pattern in (
+            r"已选\s*(\d+)\s*件",
+            r"共\s*(\d+)\s*件",
+            r"购物车[^\d]{0,8}(\d+)\s*件",
+        ):
+            match = re.search(pattern, normalized)
+            if match:
+                return int(match.group(1))
+        if "购物车" in normalized:
+            # Current Flutter bottom bar is exposed as one composite label:
+            # ``8\n₱1295.00\n购物车``.
+            match = re.match(r"\s*(\d+)\b", normalized)
+            if match:
+                return int(match.group(1))
+        return None
+
+    def shop_cart_has_purchasable_items(self) -> bool:
+        """Return true only when the current merchant cart visibly contains items."""
+        w, h = self._window_size_safe()
+        y_min = int(h * 0.55)
+        explicit_empty = False
+        xpaths = (
+            _XPATH_DESC_CART,
+            '//*[contains(@content-desc,"已选") and contains(@content-desc,"件")]',
+            '//*[contains(@content-desc,"共") and contains(@content-desc,"件")]',
+            '//*[contains(@text,"已选") and contains(@text,"件")]',
+            '//*[contains(@text,"共") and contains(@text,"件")]',
+        )
+        for xp in xpaths:
+            try:
+                with self._maybe_zero_implicit_wait():
+                    elements = self.driver.find_elements(AppiumBy.XPATH, xp)
+                for el in elements:
+                    try:
+                        if not el.is_displayed() or int(el.location.get("y", 0)) < y_min:
+                            continue
+                        labels = (
+                            el.get_attribute("contentDescription") or "",
+                            el.get_attribute("content-desc") or "",
+                            el.text or "",
+                        )
+                        for label in labels:
+                            count = self._cart_item_count_from_label(label)
+                            if count is None:
+                                continue
+                            if count > 0:
+                                logger.info("购物车已有 %d 件商品，本次复用，不再加购", count)
+                                return True
+                            explicit_empty = True
+                    except Exception:
+                        continue
+            except Exception:
+                continue
+
+        # Flutter may flatten the whole bottom bar into page source without exposing
+        # an independently locatable semantics node.
+        try:
+            source = self.driver.page_source or ""
+            for raw_label in re.findall(
+                r'content-desc="([^"]*购物车[^"]*)"', source
+            ):
+                count = self._cart_item_count_from_label(raw_label)
+                if count is not None and count > 0:
+                    logger.info("购物车复合语义显示已有 %d 件，本次复用", count)
+                    return True
+                if count == 0:
+                    explicit_empty = True
+            for match in re.finditer(r"(?:已选|共)\s*(\d+)\s*件", html.unescape(source)):
+                count = int(match.group(1))
+                if count > 0:
+                    logger.info("购物车页面语义显示已有 %d 件，本次复用", count)
+                    return True
+                explicit_empty = True
+        except Exception:
+            pass
+
+        if explicit_empty:
+            logger.info("购物车明确显示 0 件，需要加购 1 件")
+        else:
+            logger.info("未发现购物车已有商品标记，按空车处理并仅加购 1 件")
+        return False
+
     def shop_tap_bottom_cart_bar(self) -> bool:
         """
         加购后唤起底部购物车弹层。Flutter 底栏常为整段 ``content-desc``，``el.click()`` 易失效，
@@ -2306,10 +2328,10 @@ class TakeoutCheckoutMixin(
             return True
         if policy not in ("on", "off"):
             logger.warning("不支持的外卖取件码策略：%s", pickup_code)
-            return True
+            return False
         if not self._checkout_scroll_until_visible(("取件码",), max_rounds=5):
-            logger.warning("外卖提交页未找到取件码区域，跳过")
-            return True
+            logger.error("外卖提交页未找到显式请求的取件码区域")
+            return False
         target = "开启" if policy == "on" else "关闭"
         row_y = self._checkout_anchor_y_ratio(("取件码",), default=0.55)
         if self._tap_first_displayed(
@@ -2327,9 +2349,9 @@ class TakeoutCheckoutMixin(
             )
             logger.info("外卖取件码%s坐标兜底", target)
             time.sleep(0.6)
+            return True
         except Exception:
-            pass
-        return True
+            return False
 
     def shop_set_notify_method(self, notify_method: str = "keep") -> bool:
         method = (notify_method or "keep").strip().lower()
@@ -2338,10 +2360,10 @@ class TakeoutCheckoutMixin(
             return True
         if method not in ("app", "phone"):
             logger.warning("不支持的外卖通知方式：%s", notify_method)
-            return True
+            return False
         if not self._checkout_scroll_until_visible(("通知方式",), max_rounds=7):
-            logger.warning("外卖提交页未找到通知方式区域，跳过")
-            return True
+            logger.error("外卖提交页未找到显式请求的通知方式区域")
+            return False
         labels = ("APP联系", "APP联络", "APP通知", "APP") if method == "app" else (
             "电话联系",
             "电话",
@@ -2364,9 +2386,9 @@ class TakeoutCheckoutMixin(
             )
             logger.info("外卖通知方式%s坐标兜底", method)
             time.sleep(0.6)
+            return True
         except Exception:
-            pass
-        return True
+            return False
 
     def _visible_edit_texts_checkout(self) -> List[Any]:
         try:
@@ -2763,13 +2785,21 @@ class TakeoutCheckoutMixin(
                 return compact[:24]
         return ""
 
+    @staticmethod
+    def _address_blob_has_phone(blob: str) -> bool:
+        for candidate in re.findall(r"(?:\+?\d[\s-]*){7,}", blob or ""):
+            if len(re.sub(r"\D", "", candidate)) >= 7:
+                return True
+        return False
+
     def shop_pick_address_in_sheet(
         self,
         *,
         address_ordinal: int,
         address_contains: Optional[str] = None,
+        require_phone: bool = False,
     ) -> bool:
-        """Select the one-based Nth existing address and verify its readback."""
+        """Select the one-based Nth eligible address and verify its readback."""
         try:
             ordinal = int(address_ordinal)
         except (TypeError, ValueError):
@@ -2797,6 +2827,9 @@ class TakeoutCheckoutMixin(
             candidates.sort(key=lambda item: item[0])
             for _y, blob, element in candidates:
                 seen_blobs.add(blob)
+                if require_phone and not self._address_blob_has_phone(blob):
+                    logger.info("COD 地址筛选：跳过未识别到手机号的地址")
+                    continue
                 seen_count += 1
                 if seen_count != ordinal:
                     continue
@@ -2823,6 +2856,9 @@ class TakeoutCheckoutMixin(
                         )
                         return True
                     if self._checkout_page_has_any(("当前地址未填写手机号",)):
+                        if require_phone:
+                            logger.error("COD 所选地址被业务侧判定为缺少手机号")
+                            return False
                         if not self._tap_first_displayed(
                             AppiumBy.XPATH,
                             '//*[@content-desc="确认并继续使用" or '
@@ -2847,6 +2883,689 @@ class TakeoutCheckoutMixin(
                 self._scroll_address_sheet_list_once(w, h, round_index)
         logger.error("已有地址不足 %d 条", ordinal)
         return False
+
+    def shop_ensure_address_in_sheet(
+        self,
+        *,
+        address_policy: str,
+        address_data: TakeoutAddressData,
+        address_ordinal: int,
+        address_contains: Optional[str] = None,
+        require_phone: bool = False,
+    ) -> bool:
+        """Apply the explicit existing/auto/add address policy."""
+        try:
+            policy = TakeoutAddressPolicy(address_policy)
+        except ValueError:
+            logger.error("不支持的外卖地址策略")
+            return False
+        if policy in (TakeoutAddressPolicy.AUTO, TakeoutAddressPolicy.ADD):
+            missing = address_data.missing_for_add()
+            if missing:
+                logger.error("新增地址缺少必填字段：%s", ",".join(missing))
+                return False
+        if policy is not TakeoutAddressPolicy.ADD:
+            picker_kwargs = dict(
+                address_ordinal=address_ordinal,
+                address_contains=address_contains,
+            )
+            try:
+                picker_parameters = inspect.signature(
+                    self.shop_pick_address_in_sheet
+                ).parameters
+            except (TypeError, ValueError):
+                picker_parameters = {}
+            if "require_phone" in picker_parameters:
+                picker_kwargs["require_phone"] = require_phone
+            selected = self.shop_pick_address_in_sheet(**picker_kwargs)
+            if selected or policy is TakeoutAddressPolicy.EXISTING:
+                return selected
+        return self.shop_add_address_from_sheet(address_data)
+
+    def shop_prepare_address_sheet_for_add(self) -> bool:
+        """Open the address book when an existing default address bypasses it."""
+        blob = self._shop_address_page_blob()
+        if "配送至" in blob and "新增地址" in blob:
+            return True
+        if any(label in blob for label in ("选择支付方式", "支付方式")):
+            try:
+                self.driver.back()
+                logger.info("新增地址策略：已关闭支付方式弹层")
+                time.sleep(0.7)
+            except Exception:
+                logger.error("新增地址策略：无法关闭支付方式弹层")
+                return False
+
+        width, height = self._window_size_safe()
+        selectors = (
+            _XPATH_DESC_SELECT_ADDRESS,
+            '//*[contains(@content-desc,"配送至") or contains(@text,"配送至")]',
+            '//*[contains(@content-desc,"收货地址") or contains(@text,"收货地址")]',
+            '//*[contains(@content-desc,"修改地址") or contains(@text,"修改地址")]',
+        )
+        for selector in selectors:
+            try:
+                elements = self.driver.find_elements(AppiumBy.XPATH, selector)
+            except Exception:
+                elements = []
+            for element in elements:
+                try:
+                    if not element.is_displayed():
+                        continue
+                    if int(element.location.get("y", 0)) > int(height * 0.62):
+                        continue
+                    if not self._coord_tap_or_click(
+                        element, "新增地址策略：已打开结算地址栏"
+                    ):
+                        continue
+                    if self._shop_wait_address_markers(
+                        ("配送至", "新增地址"), attempts=40
+                    ):
+                        logger.info("新增地址策略：已进入地址簿")
+                        return True
+                except Exception:
+                    continue
+        logger.error("新增地址策略：未能从结算页打开地址簿")
+        return False
+
+    def _shop_address_page_blob(self) -> str:
+        try:
+            return self.driver.page_source or ""
+        except Exception:
+            return ""
+
+    def _shop_address_page_has_any(self, labels: Sequence[str]) -> bool:
+        blob = self._shop_address_page_blob()
+        return any(label in blob for label in labels)
+
+    def _shop_click_address_labels(self, labels: Sequence[str]) -> bool:
+        for label in labels:
+            literal = xpath_literal(label)
+            selector = f'//*[@content-desc={literal} or @text={literal}]'
+            try:
+                elements = self.driver.find_elements(AppiumBy.XPATH, selector)
+            except Exception:
+                elements = []
+            for element in elements:
+                try:
+                    if element.is_displayed() and self._coord_tap_or_click(
+                        element, f"已点击地址流程按钮「{label}」"
+                    ):
+                        return True
+                except Exception:
+                    continue
+        return False
+
+    def _shop_wait_address_markers(
+        self, labels: Sequence[str], *, attempts: int = 48
+    ) -> bool:
+        for attempt in range(attempts):
+            if self._shop_address_page_has_any(labels):
+                return True
+            if attempt + 1 < attempts:
+                time.sleep(0.25)
+        return False
+
+    def _shop_open_add_address_form(self) -> bool:
+        clicked = self._shop_click_address_labels(
+            ("+ 新增地址", "新增地址", "添加地址", "新建地址")
+        )
+        if not clicked and self._shop_address_page_has_any(("配送至",)) and self._shop_address_page_has_any(("新增地址",)):
+            try:
+                width, height = self._window_size_safe()
+                self.driver.execute_script(
+                    "mobile: clickGesture",
+                    {"x": int(width * 0.50), "y": int(height * 0.92)},
+                )
+                clicked = True
+                logger.info("已点击空地址弹层底部新增地址按钮（复合语义兜底）")
+            except Exception:
+                clicked = False
+        if not clicked:
+            logger.error("外卖地址簿未找到新增地址入口")
+            return False
+        markers = (
+            "定位地址",
+            "新增收货地址",
+            "联系人",
+            "手机号",
+            "详细地址",
+            "立即开启",
+            "请前往设置中心打开定位权限",
+            "仅在使用中允许",
+        )
+        if not self._shop_wait_address_markers(markers):
+            logger.error("点击新增地址后未进入定位页或地址表单")
+            return False
+        logger.info("已进入外卖新增地址流程")
+        return True
+
+    def _shop_visible_address_edits(self) -> List[Any]:
+        try:
+            elements = self.driver.find_elements(
+                AppiumBy.CLASS_NAME, "android.widget.EditText"
+            )
+        except Exception:
+            return []
+        visible = []
+        for element in elements:
+            try:
+                if element.is_displayed():
+                    visible.append((int(element.location.get("y", 0)), element))
+            except Exception:
+                continue
+        visible.sort(key=lambda item: item[0])
+        return [element for _, element in visible]
+
+    def _shop_type_private_address_value(
+        self, element: Any, value: str, description: str
+    ) -> bool:
+        try:
+            element.click()
+            try:
+                element.clear()
+            except Exception:
+                pass
+            element.send_keys(value)
+            logger.info("已填写外卖新增地址字段：%s", description)
+            return True
+        except Exception:
+            try:
+                element.click()
+                self.driver.set_clipboard_text(value)
+                self.driver.press_keycode(279)
+                logger.info("已填写外卖新增地址字段：%s", description)
+                return True
+            except Exception:
+                return False
+
+    @staticmethod
+    def _shop_element_blob(element: Any) -> str:
+        values = []
+        for attribute in ("content-desc", "text"):
+            try:
+                value = (element.get_attribute(attribute) or "").strip()
+            except Exception:
+                value = ""
+            if value and value not in values:
+                values.append(value)
+        return " ".join(values)
+
+    def _shop_unique_location_result(
+        self, elements: Sequence[Any], query: str
+    ) -> Optional[Any]:
+        matches = []
+        seen = set()
+        for element in elements:
+            try:
+                if not element.is_displayed():
+                    continue
+                blob = self._shop_element_blob(element)
+                if query not in blob:
+                    continue
+                y = int(element.location.get("y", 0))
+                if y < int(self._window_height() * 0.18):
+                    continue
+                key = (
+                    blob,
+                    int(element.location.get("x", 0)),
+                    y,
+                    int(element.size.get("width", 0)),
+                    int(element.size.get("height", 0)),
+                )
+            except Exception:
+                continue
+            if key not in seen:
+                seen.add(key)
+                matches.append(element)
+        return matches[0] if len(matches) == 1 else None
+
+    @staticmethod
+    def _shop_location_query_fragments(query: str) -> Tuple[str, ...]:
+        full = " ".join((query or "").split()).strip()
+        first_segment = full.split(",", 1)[0].strip()
+        return tuple(
+            dict.fromkeys(
+                fragment for fragment in (full, first_segment) if fragment
+            )
+        )
+
+    def _shop_find_unique_location_result_for_query(
+        self, query: str, *, attempts: int = 16
+    ) -> Optional[Any]:
+        fragments = self._shop_location_query_fragments(query)
+        for attempt in range(attempts):
+            for fragment in fragments:
+                literal = xpath_literal(fragment)
+                selector = (
+                    f'//*[contains(@content-desc,{literal}) '
+                    f'or contains(@text,{literal})]'
+                )
+                try:
+                    elements = self.driver.find_elements(AppiumBy.XPATH, selector)
+                except Exception:
+                    elements = []
+                result = self._shop_unique_location_result(elements, fragment)
+                if result is not None:
+                    return result
+                if len(elements) > 1:
+                    return None
+            if attempt + 1 < attempts:
+                time.sleep(0.25)
+        return None
+
+    def _shop_select_new_address_location(self, data: TakeoutAddressData) -> bool:
+        permission_markers = (
+            "立即开启",
+            "请前往设置中心打开定位权限",
+            "仅在使用中允许",
+        )
+        if self._shop_address_page_has_any(permission_markers):
+            enable = getattr(self, "_ensure_location_permission_enabled", None)
+            if not callable(enable) or not enable():
+                logger.error("新增地址前未能开启定位权限")
+                return False
+
+        search_markers = ("定位地址", "请直接搜索", "搜索地址", "街道名称")
+        if not self._shop_address_page_has_any(search_markers):
+            if not self._shop_click_address_labels(
+                ("定位地址", "地图地址", "请选择地址", "选择地址")
+            ):
+                logger.error("新增地址表单未找到定位地址入口")
+                return False
+            if not self._shop_wait_address_markers(search_markers):
+                logger.error("点击定位地址后未进入地址搜索页")
+                return False
+
+        edits = self._shop_visible_address_edits()
+        if not edits:
+            try:
+                width, height = self._window_size_safe()
+                self.driver.execute_script(
+                    "mobile: clickGesture",
+                    {"x": int(width * 0.50), "y": int(height * 0.13)},
+                )
+                logger.info("已聚焦定位地址页顶部搜索框（语义缺失兜底）")
+            except Exception:
+                pass
+            for attempt in range(8):
+                edits = self._shop_visible_address_edits()
+                if edits:
+                    break
+                if attempt + 1 < 8:
+                    time.sleep(0.2)
+        if not edits or not self._shop_type_private_address_value(
+            edits[0], data.search, "定位搜索词"
+        ):
+            logger.error("定位地址页搜索框不可填写")
+            return False
+        try:
+            self.driver.press_keycode(66)
+        except Exception:
+            pass
+        try:
+            self.driver.hide_keyboard()
+        except Exception:
+            pass
+
+        result = self._shop_find_unique_location_result_for_query(data.search)
+        if result is None:
+            logger.error("定位地址未找到唯一匹配结果")
+            return False
+        if not self._coord_tap_or_click(result, "已选择唯一定位地址结果"):
+            return False
+        time.sleep(0.4)
+        self._shop_click_address_labels(
+            ("使用该地址", "选择该地址", "确认地址", "确定", "完成")
+        )
+        form_markers = ("联系人", "手机号", "手机号码", "详细地址", "保存")
+        if not self._shop_wait_address_markers(form_markers):
+            logger.error("选择定位结果后未回到新增地址表单")
+            return False
+        logger.info("已选择唯一定位地址结果")
+        return True
+
+    def _shop_type_labeled_address_field(
+        self,
+        labels: Sequence[str],
+        value: str,
+        description: str,
+    ) -> bool:
+        for label in labels:
+            literal = xpath_literal(label)
+            selectors = (
+                f'//*[contains(@text,{literal})]/following::android.widget.EditText[1]',
+                f'//*[contains(@content-desc,{literal})]/following::android.widget.EditText[1]',
+                f'//android.widget.EditText[contains(@text,{literal}) '
+                f'or contains(@content-desc,{literal}) or contains(@hint,{literal})]',
+            )
+            for selector in selectors:
+                try:
+                    elements = self.driver.find_elements(AppiumBy.XPATH, selector)
+                except Exception:
+                    elements = []
+                for element in elements:
+                    try:
+                        if element.is_displayed() and self._shop_type_private_address_value(
+                            element, value, description
+                        ):
+                            return True
+                    except Exception:
+                        continue
+        return False
+
+    def _shop_fill_new_address_form(self, data: TakeoutAddressData) -> bool:
+        fields = (
+            (("联系人", "联系人姓名", "收货人", "姓名"), data.contact, "联系人"),
+            (("手机号", "手机号码", "联系电话", "电话"), data.phone, "手机号"),
+            (("详细地址", "地址详情", "门牌号", "补充地址"), data.detail, "详细地址"),
+        )
+        for labels, value, description in fields:
+            if not self._shop_type_labeled_address_field(labels, value, description):
+                logger.error("外卖新增地址字段不可填写：%s", description)
+                return False
+            try:
+                self.driver.hide_keyboard()
+                time.sleep(0.3)
+            except Exception:
+                pass
+        return True
+
+    def _shop_upload_first_gallery_photo(self) -> bool:
+        """Upload the first visible existing gallery image (explicitly authorized)."""
+        width, height = self._window_size_safe()
+        keyboard_visible = False
+        try:
+            keyboard_visible = bool(self.driver.is_keyboard_shown())
+            if keyboard_visible:
+                self.driver.hide_keyboard()
+                time.sleep(0.5)
+                keyboard_visible = bool(self.driver.is_keyboard_shown())
+                if keyboard_visible:
+                    self.driver.press_keycode(4)
+                    time.sleep(0.6)
+                    keyboard_visible = bool(self.driver.is_keyboard_shown())
+        except Exception:
+            try:
+                self.driver.hide_keyboard()
+                time.sleep(0.4)
+            except Exception:
+                pass
+        photo_label = None
+        try:
+            labels = self.driver.find_elements(
+                AppiumBy.XPATH,
+                '//*[@content-desc="地址图片" or @text="地址图片"]',
+            )
+            for element in labels:
+                if element.is_displayed():
+                    photo_label = element
+                    break
+        except Exception:
+            photo_label = None
+        tap_ys = []
+        if photo_label is not None:
+            label_y = int(photo_label.location.get("y", 0))
+            label_h = int(photo_label.size.get("height", 0))
+            tap_ys.append(
+                min(
+                    int(height * 0.78),
+                    label_y + label_h + int(height * 0.08),
+                )
+            )
+        tap_ys.extend((int(height * 0.21), int(height * 0.39)))
+        tap_ys = list(dict.fromkeys(tap_ys))
+        entry_opened = False
+        entry_markers = (
+            "获取存储权限",
+            "访问设备上的照片和视频",
+            "Recent",
+            "最近",
+            "相册",
+        )
+        for tap_y in tap_ys:
+            try:
+                self.driver.execute_script(
+                    "mobile: clickGesture",
+                    {"x": int(width * 0.15), "y": tap_y},
+                )
+                logger.info(
+                    "已尝试地址图片「+」入口 (%d,%d，keyboard=%s，label=%s)",
+                    int(width * 0.15),
+                    tap_y,
+                    keyboard_visible,
+                    photo_label is not None,
+                )
+            except Exception:
+                continue
+            for _ in range(8):
+                if any(
+                    marker in self._shop_address_page_blob()
+                    for marker in entry_markers
+                ):
+                    entry_opened = True
+                    break
+                time.sleep(0.25)
+            if entry_opened:
+                break
+        if not entry_opened:
+            logger.error("地址图片候选坐标均未打开权限或相册页面")
+            return False
+
+        picker_ready = False
+        for _ in range(60):
+            blob = self._shop_address_page_blob()
+            if "获取存储权限" in blob and "确定" in blob:
+                if not self._shop_click_address_labels(("确定",)):
+                    logger.error("存储权限说明已出现，但未点到「确定」")
+                    return False
+                logger.info("已确认地址图片存储权限说明")
+                time.sleep(0.5)
+                continue
+            if "访问设备上的照片和视频" in blob:
+                if not self._shop_click_address_labels(
+                    ("始终允许", "允许访问所有照片", "允许所有照片", "允许")
+                ):
+                    logger.error("照片和视频权限已出现，但未选择允许")
+                    return False
+                logger.info("已允许访问设备照片和视频")
+                time.sleep(0.6)
+                continue
+            if any(label in blob for label in ("Recent", "最近", "相册")):
+                picker_ready = True
+                break
+            time.sleep(0.25)
+        if not picker_ready:
+            logger.error("地址图片入口未进入相册网格")
+            return False
+
+        candidates: List[Any] = []
+        try:
+            candidates = self.driver.find_elements(
+                AppiumBy.CLASS_NAME, "android.widget.ImageView"
+            )
+        except Exception:
+            candidates = []
+        ranked = []
+        for element in candidates:
+            try:
+                if not element.is_displayed():
+                    continue
+                x = int(element.location.get("x", 0))
+                y = int(element.location.get("y", 0))
+                ew = int(element.size.get("width", 0))
+                eh = int(element.size.get("height", 0))
+                label = " ".join(
+                    filter(
+                        None,
+                        (
+                            element.get_attribute("content-desc") or "",
+                            element.get_attribute("text") or "",
+                        ),
+                    )
+                )
+                if any(word in label for word in ("相机", "拍照", "返回", "关闭")):
+                    continue
+                if x < int(width * 0.22) and y < int(height * 0.55):
+                    # The first tile in the real picker is the camera shortcut.
+                    continue
+                if y < int(height * 0.12) or y > int(height * 0.88):
+                    continue
+                if ew < 64 or eh < 64:
+                    continue
+                ranked.append((y, x, element))
+            except Exception:
+                continue
+        ranked.sort(key=lambda item: (item[0], item[1]))
+        selected = False
+        if ranked:
+            selected = self._coord_tap_or_click(
+                ranked[0][2], "已选择相册第一张可见图片"
+            )
+        if not selected:
+            # System photo pickers do not always expose thumbnail semantics.
+            try:
+                self.driver.execute_script(
+                    "mobile: clickGesture",
+                    {"x": int(width * 0.39), "y": int(height * 0.38)},
+                )
+                selected = True
+                logger.info("已坐标选择相册第一张现有图片（跳过相机格）")
+            except Exception:
+                selected = False
+        if not selected:
+            logger.error("系统相册中未选择到图片")
+            return False
+        time.sleep(0.8)
+
+        selection_toggled = False
+        selection_confirmed = False
+        for _ in range(60):
+            blob = self._shop_address_page_blob()
+            if selection_confirmed and any(
+                marker in blob for marker in ("新增收货地址", "地址图片", "联系人姓名")
+            ):
+                logger.info("地址照片已从相册回填到新增地址表单")
+                return True
+            if selection_toggled and "确定" in blob:
+                if self._shop_click_address_labels(("确定",)):
+                    selection_confirmed = True
+                    logger.info("已确认相册图片选择")
+                    time.sleep(0.6)
+                    continue
+            if not selection_toggled and "选择" in blob:
+                if self._shop_click_address_labels(("选择",)):
+                    selection_toggled = True
+                    logger.info("已在图片预览页勾选图片")
+                    time.sleep(0.4)
+                    continue
+            time.sleep(0.25)
+        logger.error("相册图片未完成“选择→确定→回填”链路")
+        return False
+
+    def _shop_save_new_address(self) -> bool:
+        try:
+            self.driver.hide_keyboard()
+        except Exception:
+            pass
+        if not self._shop_click_address_labels(("保存", "完成", "提交")):
+            logger.error("外卖新增地址表单未找到保存入口")
+            return False
+        saved_markers = (
+            "配送至",
+            "新增地址",
+            "选择支付方式",
+            "提交订单",
+            "确认支付",
+        )
+        save_accepted = False
+        save_click_count = 1
+        for attempt in range(96):
+            blob = self._shop_address_page_blob()
+            if any(marker in blob for marker in saved_markers):
+                return True
+            if any(marker in blob for marker in ("保存成功", "正在加载")):
+                if not save_accepted:
+                    logger.info("地址保存请求已受理，继续等待地址列表")
+                save_accepted = True
+            if "上传图片" in blob and "跳过" in blob:
+                logger.error("保存后仍提示上传地址照片，表单图片回填未生效")
+                return False
+            if (
+                not save_accepted
+                and save_click_count < 3
+                and attempt in (8, 24)
+                and "保存" in blob
+            ):
+                if self._shop_click_address_labels(("保存",)):
+                    save_click_count += 1
+                    logger.info(
+                        "地址表单仍未响应，重试保存（第 %d 次）",
+                        save_click_count,
+                    )
+            if attempt + 1 < 96:
+                time.sleep(0.25)
+        logger.error("保存地址后未回到地址列表或结算页")
+        return False
+
+    def _shop_verify_new_address(self, data: TakeoutAddressData) -> bool:
+        phone_tail = re.sub(r"\D", "", data.phone)[-4:]
+        stable_markers = (
+            data.contact.strip(),
+            data.detail.strip()[:12],
+        )
+        blob = self._shop_address_page_blob()
+        if not phone_tail or phone_tail not in re.sub(r"\D", "", blob):
+            logger.error("新增地址保存后未回读到手机号尾号")
+            return False
+        if not any(marker and marker in blob for marker in stable_markers):
+            logger.error("新增地址保存后未回读到第二个稳定标志")
+            return False
+        if any(marker in blob for marker in ("选择支付方式", "提交订单", "确认支付")):
+            return True
+
+        tail_literal = xpath_literal(phone_tail)
+        selector = (
+            f'//*[contains(@content-desc,{tail_literal}) '
+            f'or contains(@text,{tail_literal})]'
+        )
+        try:
+            candidates = self.driver.find_elements(AppiumBy.XPATH, selector)
+        except Exception:
+            candidates = []
+        result = self._shop_unique_location_result(candidates, phone_tail)
+        if result is None:
+            logger.error("新增地址保存后无法唯一选中新增记录")
+            return False
+        if not self._coord_tap_or_click(result, "已选中新增地址（手机号尾号匹配）"):
+            return False
+        if not self._shop_wait_address_markers(
+            ("选择支付方式", "提交订单", "确认支付"), attempts=20
+        ):
+            logger.error("选中新增地址后未返回结算或支付方式页面")
+            return False
+        return True
+
+    def shop_add_address_from_sheet(self, data: TakeoutAddressData) -> bool:
+        """Create one address and accept it only after stable readback."""
+        missing = data.missing_for_add()
+        if missing:
+            logger.error("新增地址缺少必填字段：%s", ",".join(missing))
+            return False
+        stages = (
+            (self._shop_open_add_address_form, ()),
+            (self._shop_select_new_address_location, (data,)),
+            (self._shop_fill_new_address_form, (data,)),
+            (self._shop_upload_first_gallery_photo, ()),
+            (self._shop_save_new_address, ()),
+            (self._shop_verify_new_address, (data,)),
+        )
+        for action, arguments in stages:
+            if not action(*arguments):
+                logger.error("外卖新增地址流程在当前阶段失败")
+                return False
+        logger.info("外卖新增地址已保存并完成脱敏回读验证")
+        return True
 
     def wait_checkout_payable_amount(
         self, *, max_attempts: int = 5, interval: float = 0.4
@@ -2917,6 +3636,14 @@ class TakeoutCheckoutMixin(
         except Exception:
             pass
         return False
+
+    @staticmethod
+    def _checkout_requires_phone_address(
+        checkout_payment: str, notify_method: str
+    ) -> bool:
+        payment = (checkout_payment or "balance").strip().lower()
+        notification = (notify_method or "keep").strip().lower()
+        return payment in ("cod", "cash_on_delivery") or notification == "phone"
     
 
     def shop_wait_for_manual_payment(self, timeout: float = 120.0) -> bool:
@@ -2937,6 +3664,8 @@ class TakeoutCheckoutMixin(
         delivery_prefer_scheduled: bool = False,
         delivery_slot_contains: Optional[str] = None,
         delivery_time_slot_ordinal: Optional[int] = None,
+        address_policy: str = TakeoutAddressPolicy.EXISTING.value,
+        address_data: Optional[TakeoutAddressData] = None,
         address_ordinal: Optional[int] = None,
         address_contains: Optional[str] = None,
         checkout_payment: str = "balance",
@@ -2961,6 +3690,11 @@ class TakeoutCheckoutMixin(
         备注默认会选择骑手/商家快捷备注，并输入 ``test order``。
         """
         self._takeout_order_submitted = False
+        try:
+            resolved_address_policy = TakeoutAddressPolicy(address_policy)
+        except ValueError as exc:
+            raise AssertionError("不支持的外卖地址策略") from exc
+        resolved_address_data = address_data or TakeoutAddressData()
         raw = (checkout_payment or "balance").strip()
         low = raw.lower()
         if low in ("cod", "cash_on_delivery") or raw in (
@@ -2989,7 +3723,10 @@ class TakeoutCheckoutMixin(
                 payable_limit = float("nan")
             if not math.isfinite(payable_limit) or payable_limit <= 0:
                 raise AssertionError("真实提交缺少有限正数 --max-payable")
-            if address_ordinal is None or address_ordinal < 1:
+            if (
+                resolved_address_policy is TakeoutAddressPolicy.EXISTING
+                and (address_ordinal is None or address_ordinal < 1)
+            ):
                 raise AssertionError("真实提交缺少有效 --address-ordinal")
             if delivery_time_slot_ordinal is None and not (
                 delivery_slot_contains or ""
@@ -2997,25 +3734,24 @@ class TakeoutCheckoutMixin(
                 raise AssertionError("真实提交缺少明确配送时段")
 
         logger.info("店铺详情：开始下单支付并取消流程…")
-        cat = (category or "").strip() or "店内招牌"
-        aliases = (
-            list(category_aliases)
-            if category_aliases
-            else None
-        )
-        logger.info(
-            "侧栏：先进入分类「%s」，再在主区首个含价商品上加购（多规格选价高）",
-            cat,
-        )
-        if not self.shop_detail_scroll_to_category(
-            cat, category_aliases=aliases
-        ):
-            logger.error("未点到侧栏分类「%s」，终止加购", cat)
-            return False
-        time.sleep(0.55)
-        if not self.shop_detail_add_first_visible_product_highest_spec(cat):
-            logger.error("主区首个商品加购失败（加号/规格层未就绪）")
-            return False
+        if self.shop_cart_has_purchasable_items():
+            logger.info("复用当前店铺购物车商品，跳过分类选择和加购")
+        else:
+            cat = (category or "").strip() or "店内招牌"
+            aliases = list(category_aliases) if category_aliases else None
+            logger.info(
+                "购物车为空：进入分类「%s」，仅加购 1 件商品（多规格选价高）",
+                cat,
+            )
+            if not self.shop_detail_scroll_to_category(
+                cat, category_aliases=aliases
+            ):
+                logger.error("未点到侧栏分类「%s」，终止加购", cat)
+                return False
+            time.sleep(0.55)
+            if not self.shop_detail_add_first_visible_product_highest_spec(cat):
+                logger.error("主区首个商品加购失败（加号/规格层未就绪）")
+                return False
         if not self.shop_tap_bottom_cart_bar():
             logger.warning("底部购物车条未点到，尝试直接去结算类入口")
         if not self.shop_tap_go_checkout():
@@ -3029,9 +3765,19 @@ class TakeoutCheckoutMixin(
             logger.error("首次「确认支付」失败")
             return False
         time.sleep(0.6)
-        ok_addr = self.shop_pick_address_in_sheet(
+        if (
+            resolved_address_policy is TakeoutAddressPolicy.ADD
+            and not self.shop_prepare_address_sheet_for_add()
+        ):
+            return False
+        ok_addr = self.shop_ensure_address_in_sheet(
+            address_policy=resolved_address_policy.value,
+            address_data=resolved_address_data,
             address_ordinal=address_ordinal or 1,
             address_contains=address_contains,
+            require_phone=self._checkout_requires_phone_address(
+                pay_mode, notify_method
+            ),
         )
         if not ok_addr:
             logger.error("地址未唯一匹配并回读，终止支付流程")

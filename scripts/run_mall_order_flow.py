@@ -60,6 +60,10 @@ from flows.mall_order_types import (
     parse_money,
 )
 from pages.mall_order_address_mixin import MallOrderAddressMixin
+from pages.takeout_address import (
+    load_takeout_address_environment,
+    resolve_business_address_search,
+)
 from pages.mall_order_cart_mixin import MallOrderCartMixin
 from pages.mall_order_checkout_mixin import MallOrderCheckoutMixin
 from pages.rounding_payment import RoundingPaymentMixin
@@ -757,7 +761,9 @@ class MallOrderFlow(
             self.restore_network(original)
 
 
-def build_parser() -> argparse.ArgumentParser:
+def build_parser(
+    *, address_query_default: Optional[str] = None
+) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="商城下单：立即购买/购物车提交订单 E2E")
     parser.add_argument("--flow", choices=("buy_now", "cart", "both"), default="buy_now")
     parser.add_argument(
@@ -888,7 +894,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--address-query",
-        default=DEFAULT_ADDRESS_QUERY,
+        default=(
+            DEFAULT_ADDRESS_QUERY
+            if address_query_default is None
+            else address_query_default
+        ),
         help="地址搜索关键字",
     )
     parser.add_argument("--address-name", default=DEFAULT_ADDRESS_NAME, help="新增地址收货人名称")
@@ -1114,7 +1124,17 @@ def validate_args(args) -> None:
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
-    args = build_parser().parse_args(argv)
+    local_address_env = load_takeout_address_environment(
+        os.environ,
+        dotenv_path=ROOT / ".env",
+    )
+    shared_address_query = resolve_business_address_search(
+        local_address_env,
+        "MALL_TEST_ADDRESS_QUERY",
+    )
+    args = build_parser(
+        address_query_default=shared_address_query or DEFAULT_ADDRESS_QUERY
+    ).parse_args(argv)
     try:
         validate_args(args)
     except ValueError as exc:

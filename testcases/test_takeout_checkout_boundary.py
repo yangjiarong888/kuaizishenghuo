@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pages.takeout_checkout_mixin import TakeoutCheckoutMixin
+from pages.takeout_address import TakeoutAddressData
 
 
 class RecordingCheckout(TakeoutCheckoutMixin):
@@ -11,6 +12,7 @@ class RecordingCheckout(TakeoutCheckoutMixin):
         preferences_ok: bool = True,
         payable_values=None,
         address_ok: bool = True,
+        cart_has_items: bool = False,
     ) -> None:
         self.events = []
         self.confirm_count = 0
@@ -18,6 +20,11 @@ class RecordingCheckout(TakeoutCheckoutMixin):
         self.preferences_ok = preferences_ok
         self.payable_values = list(payable_values or [100.0])
         self.address_ok = address_ok
+        self.cart_has_items = cart_has_items
+
+    def shop_cart_has_purchasable_items(self):
+        self.events.append(("cart-has-items", self.cart_has_items))
+        return self.cart_has_items
 
     def shop_detail_scroll_to_category(self, *args, **kwargs):
         self.events.append("category")
@@ -45,10 +52,18 @@ class RecordingCheckout(TakeoutCheckoutMixin):
         return True
 
     def shop_pick_address_in_sheet(
-        self, *, address_ordinal, address_contains=None
+        self, *, address_ordinal, address_contains=None, require_phone=False
     ):
         self.events.append(("address", address_ordinal, address_contains))
         return self.address_ok
+
+    def shop_add_address_from_sheet(self, data):
+        self.events.append("address-added-and-verified")
+        return True
+
+    def shop_prepare_address_sheet_for_add(self):
+        self.events.append("prepare-address-sheet-for-add")
+        return True
 
     def shop_apply_checkout_coupons(self, **kwargs):
         self.events.append("coupons")
@@ -90,6 +105,15 @@ class RecordingCheckout(TakeoutCheckoutMixin):
     def shop_cancel_order_flow(self):
         self.events.append("cancel")
         return True
+
+
+def test_cart_item_count_reads_flutter_composite_cart_label() -> None:
+    assert (
+        TakeoutCheckoutMixin._cart_item_count_from_label(
+            "8\n₱1295.00\n购物车"
+        )
+        == 8
+    )
 
 
 def test_preview_stops_before_final_confirmation(monkeypatch) -> None:
@@ -205,6 +229,79 @@ def test_payment_sheet_is_resolved_before_checkout_preferences(monkeypatch) -> N
     assert page.events.index(address_event) < page.events.index("cod")
     assert page.events.index("cod") < page.events.index("coupons")
     assert page.events.index("cod") < page.events.index("preferences")
+
+
+def test_auto_address_creation_is_verified_before_payment_selection(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr("pages.takeout_checkout_mixin.time.sleep", lambda _: None)
+    page = RecordingCheckout(address_ok=False)
+    data = TakeoutAddressData(
+        "Automation Contact",
+        "09171234567",
+        "Robinsons Place Manila",
+        "Unit 8 test address",
+    )
+
+    assert page.run_shop_checkout_pay_and_cancel_flow(
+        submit_order=False,
+        checkout_payment="cod",
+        address_policy="auto",
+        address_data=data,
+        address_ordinal=None,
+    )
+
+    assert page.events.index("address-added-and-verified") < page.events.index("cod")
+
+
+def test_add_policy_opens_address_book_before_creating_address(monkeypatch) -> None:
+    monkeypatch.setattr("pages.takeout_checkout_mixin.time.sleep", lambda _: None)
+    page = RecordingCheckout()
+    data = TakeoutAddressData(
+        "Automation Contact",
+        "09171234567",
+        "Robinsons Place Manila",
+        "Unit 8 test address",
+    )
+
+    assert page.run_shop_checkout_pay_and_cancel_flow(
+        submit_order=False,
+        checkout_payment="cod",
+        address_policy="add",
+        address_data=data,
+    )
+
+    assert page.events.index("prepare-address-sheet-for-add") < page.events.index(
+        "address-added-and-verified"
+    )
+
+
+def test_existing_cart_item_is_reused_without_adding_again(monkeypatch) -> None:
+    monkeypatch.setattr("pages.takeout_checkout_mixin.time.sleep", lambda _: None)
+    page = RecordingCheckout(cart_has_items=True)
+
+    assert page.run_shop_checkout_pay_and_cancel_flow(
+        submit_order=False,
+        address_ordinal=1,
+    )
+
+    assert "category" not in page.events
+    assert "add" not in page.events
+    assert page.events.count("cart") == 1
+    assert page.events.count("checkout") == 1
+
+
+def test_empty_cart_adds_exactly_one_product_before_checkout(monkeypatch) -> None:
+    monkeypatch.setattr("pages.takeout_checkout_mixin.time.sleep", lambda _: None)
+    page = RecordingCheckout(cart_has_items=False)
+
+    assert page.run_shop_checkout_pay_and_cancel_flow(
+        submit_order=False,
+        address_ordinal=1,
+    )
+
+    assert page.events.count("category") == 1
+    assert page.events.count("add") == 1
 
 
 def test_checkout_stops_when_requested_preferences_cannot_be_applied(

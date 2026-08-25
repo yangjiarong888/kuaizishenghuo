@@ -30,6 +30,43 @@ def _log_file_tag_from_env_or_argv() -> str:
     for index, argument in enumerate(sys.argv):
         if argument.lower() == "--method" and index + 1 < len(sys.argv):
             return _sanitize_log_file_tag(sys.argv[index + 1])
+    argv = list(sys.argv)
+    script = Path(argv[0]).stem.lower() if argv else ""
+    if script == "run_takeout_wangwang":
+        parts = ["takeout_wangwang"]
+
+        def value_after(flag: str) -> str:
+            try:
+                index = argv.index(flag)
+            except ValueError:
+                return ""
+            return argv[index + 1] if index + 1 < len(argv) else ""
+
+        if "--checkout" in argv:
+            parts.append("checkout")
+        if "--submit-order" in argv:
+            parts.append("submit")
+        address_policy = value_after("--address-policy").lower()
+        if address_policy:
+            parts.extend(("address", address_policy))
+        payment = value_after("--checkout-payment").lower()
+        if payment:
+            parts.append(payment)
+        slot_ordinal = value_after("--delivery-time-slot-ordinal")
+        if slot_ordinal:
+            parts.extend(("slot", "ordinal", slot_ordinal))
+        elif value_after("--delivery-slot-contains"):
+            parts.extend(("slot", "contains"))
+        if "--category" in argv:
+            parts.append("category")
+        coupon_policy = value_after("--coupon-policy").lower()
+        if coupon_policy:
+            parts.extend(("coupon", coupon_policy))
+        if "--pickup-code" in argv or "--notify-method" in argv:
+            parts.append("preferences")
+        if "--cold" in argv or value_after("--start-mode").lower() == "cold":
+            parts.append("cold")
+        return _sanitize_log_file_tag("_".join(parts))
     return ""
 
 

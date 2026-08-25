@@ -1,4 +1,5 @@
 import logging
+import sys
 
 import pytest
 
@@ -51,3 +52,60 @@ def test_logger_redacts_keyed_secrets(tmp_path, monkeypatch):
     assert "123456" not in content
     assert "token=abc" not in content
     assert "<redacted>" in content
+
+
+def test_takeout_log_name_describes_cod_command(tmp_path, monkeypatch):
+    monkeypatch.delenv("CHOPSTICKLIFE_LOG_FILE_TAG", raising=False)
+    monkeypatch.setenv("CHOPSTICKLIFE_LOG_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "scripts/run_takeout_wangwang.py",
+            "--checkout",
+            "--checkout-payment",
+            "cod",
+        ],
+    )
+
+    name = logger_module._build_log_path().name
+
+    assert "takeout_wangwang_checkout_cod" in name
+
+
+def test_takeout_log_name_describes_delivery_slot_ordinal(tmp_path, monkeypatch):
+    monkeypatch.delenv("CHOPSTICKLIFE_LOG_FILE_TAG", raising=False)
+    monkeypatch.setenv("CHOPSTICKLIFE_LOG_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "scripts/run_takeout_wangwang.py",
+            "--checkout",
+            "--delivery-time-slot-ordinal",
+            "5",
+        ],
+    )
+
+    name = logger_module._build_log_path().name
+
+    assert "takeout_wangwang_checkout_slot_ordinal_5" in name
+
+
+def test_takeout_log_name_describes_address_creation_policy(tmp_path, monkeypatch):
+    monkeypatch.delenv("CHOPSTICKLIFE_LOG_FILE_TAG", raising=False)
+    monkeypatch.setenv("CHOPSTICKLIFE_LOG_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "scripts/run_takeout_wangwang.py",
+            "--checkout",
+            "--address-policy",
+            "auto",
+        ],
+    )
+
+    name = logger_module._build_log_path().name
+
+    assert "takeout_wangwang_checkout_address_auto" in name

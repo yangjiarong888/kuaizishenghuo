@@ -24,6 +24,14 @@ def test_mall_cli_defaults_are_non_mutating_and_have_no_personal_data():
     assert args.allow_address_mutation is False
 
 
+def test_mall_parser_accepts_shared_business_address_search_default():
+    args = mall_cli.build_parser(
+        address_query_default="Unified Business Address"
+    ).parse_args([])
+
+    assert args.address_query == "Unified Business Address"
+
+
 @pytest.mark.parametrize(
     "flag",
     (

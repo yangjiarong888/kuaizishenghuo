@@ -230,9 +230,8 @@ class TakeoutDeliveryTimeMixin:
         return False
     
 
-    def _format_day_after_tomorrow_cn_fragments(self) -> List[str]:
-        """后天在列表里常为「4月25日」而非字面「后天」；多格式尝试 ``contains``。"""
-        d = date.today() + timedelta(days=2)
+    def _format_future_date_cn_fragments(self, days: int) -> List[str]:
+        d = date.today() + timedelta(days=days)
         m, dd = d.month, d.day
         raw = (
             f"{m}月{dd}日",
@@ -247,6 +246,14 @@ class TakeoutDeliveryTimeMixin:
                 seen.add(s)
                 out.append(s)
         return out
+
+    def _format_day_after_tomorrow_cn_fragments(self) -> List[str]:
+        """后天在列表里常为「4月25日」而非字面「后天」。"""
+        return self._format_future_date_cn_fragments(2)
+
+    def _format_tomorrow_cn_fragments(self) -> List[str]:
+        """明天在列表里常只显示动态月日。"""
+        return self._format_future_date_cn_fragments(1)
     
 
     def _collect_date_list_views_ordered(self) -> List[Any]:
@@ -310,7 +317,7 @@ class TakeoutDeliveryTimeMixin:
                 logger.info("已选日期：列表第三项（索引 2）")
                 time.sleep(0.65)
                 return True
-        for label in ("后天", "大后天"):
+        for label in ("后天",):
             if self._tap_first_displayed(
                 AppiumBy.XPATH,
                 f'//*[contains(@content-desc,"{label}")]',
@@ -322,6 +329,46 @@ class TakeoutDeliveryTimeMixin:
                 time.sleep(0.65)
                 return True
         return False
+
+    def _tap_tomorrow_date_in_sheet(self) -> bool:
+        for frag in self._format_tomorrow_cn_fragments():
+            safe = frag.replace('"', "")
+            if not safe:
+                continue
+            if self._tap_first_displayed(
+                AppiumBy.XPATH,
+                f'//*[contains(@content-desc,"{safe}")]',
+            ) or self._tap_first_displayed(
+                AppiumBy.XPATH,
+                f'//*[contains(@text,"{safe}")]',
+            ):
+                logger.info("已选明天等价日期（动态月日）")
+                time.sleep(0.65)
+                return True
+        ordered = self._collect_date_list_views_ordered()
+        if len(ordered) >= 2 and self._coord_tap_or_click(
+            ordered[1], "已点日期列表第二项（明天）"
+        ):
+            logger.info("已选日期：列表第二项（明天）")
+            time.sleep(0.65)
+            return True
+        for selector in (
+            '//*[contains(@content-desc,"明天")]',
+            '//*[contains(@text,"明天")]',
+        ):
+            if self._tap_first_displayed(AppiumBy.XPATH, selector):
+                logger.info("已选日期「明天」（字面）")
+                time.sleep(0.65)
+                return True
+        return False
+
+    def _tap_allowed_delivery_date_in_sheet(self) -> Optional[str]:
+        """Prefer day after tomorrow, then tomorrow; never choose another day."""
+        if self._tap_day_after_tomorrow_date_in_sheet():
+            return "后天"
+        if self._tap_tomorrow_date_in_sheet():
+            return "明天"
+        return None
     
 
     def _tap_delivery_time_confirm_if_present(self) -> None:
@@ -528,7 +575,7 @@ class TakeoutDeliveryTimeMixin:
     ) -> bool:
         """
         与产品流程对齐：回到订单提交页 → **主区手指下移拖动**（露出上方配送行）→ **立即配送**（默认）唤起弹层
-        → **后天**（动态「M月d日」或列表第三项）→ 选时段 → 若有「确定」则点。
+        → 优先 **后天**、不可用则 **明天** → 选时段 → 若有「确定」则点。
 
         ``prefer_scheduled=True``：先尝试「预约配送」等 Tab（少数 UI）。
         ``preferred_slot_contains``：如 ``\"01:40\"``，在候选里筛含该子串的节点。
@@ -567,9 +614,11 @@ class TakeoutDeliveryTimeMixin:
         time.sleep(1.0)
         list_x = int(w * 0.72)
         with self._maybe_zero_implicit_wait():
-            if not self._tap_day_after_tomorrow_date_in_sheet():
-                logger.error("未确认后天日期，禁止降级选择明天/今天")
+            selected_day = self._tap_allowed_delivery_date_in_sheet()
+            if selected_day is None:
+                logger.error("未找到明天或后天，禁止选择其他配送日期")
                 return False
+            logger.info("配送日期已限制并选择：%s", selected_day)
     
             for attempt in range(8):
                 slots: List = []

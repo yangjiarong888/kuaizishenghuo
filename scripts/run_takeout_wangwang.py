@@ -14,7 +14,6 @@
   python scripts/run_takeout_wangwang.py --checkout --submit-order --max-payable 5000 --address-ordinal 1 --delivery-time-slot-ordinal 1    # 真实下单
   python scripts/run_takeout_wangwang.py --checkout --category "健康粮油"   # 指定商品分类
   python scripts/run_takeout_wangwang.py --checkout --delivery-time-slot-ordinal 5
-  python scripts/run_takeout_wangwang.py --checkout --delivery-slot-contains 01:40
   python scripts/run_takeout_wangwang.py --checkout --checkout-payment cod
   python scripts/run_takeout_wangwang.py --checkout --coupon-policy require
   python scripts/run_takeout_wangwang.py --checkout --pickup-code on --notify-method phone
@@ -45,6 +44,11 @@ if str(ROOT) not in sys.path:
 
 from commons.driver import DriverManager
 from commons.logger import setup_logger
+from pages.takeout_address import (
+    TakeoutAddressPolicy,
+    load_takeout_address_data,
+    load_takeout_address_environment,
+)
 from pages.takeout_checkout_mixin import (
     DEFAULT_MERCHANT_REMARK,
     DEFAULT_REMARK_TEXT,
@@ -110,6 +114,15 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "时段文案需包含的子串（如 01:40）；可与 --delivery-time-slot-ordinal 联用："
             "先筛含该串的格子，再在其中取第 N 行。"
+        ),
+    )
+    parser.add_argument(
+        "--address-policy",
+        choices=tuple(policy.value for policy in TakeoutAddressPolicy),
+        default=TakeoutAddressPolicy.EXISTING.value,
+        help=(
+            "地址策略：existing 只选已有地址（默认）；auto 无合格地址时新增；"
+            "add 强制新增。新增数据只读取 TAKEOUT_ADDRESS_* 环境变量。"
         ),
     )
     parser.add_argument(
@@ -202,12 +215,23 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def validate_args(args: argparse.Namespace) -> None:
+def validate_args(
+    args: argparse.Namespace,
+    *,
+    environ: Optional[dict[str, str]] = None,
+) -> None:
+    env = os.environ if environ is None else environ
+    address_policy = TakeoutAddressPolicy(args.address_policy)
+    address_data = load_takeout_address_data(env)
     if args.submit_order and not args.checkout:
         raise ValueError("--submit-order requires --checkout")
     if args.submit_order and (args.max_payable is None or args.max_payable <= 0):
         raise ValueError("real takeout order requires positive --max-payable")
-    if args.submit_order and args.address_ordinal is None:
+    if (
+        args.submit_order
+        and address_policy is TakeoutAddressPolicy.EXISTING
+        and args.address_ordinal is None
+    ):
         raise ValueError("real takeout order requires --address-ordinal")
     if args.address_ordinal is not None and args.address_ordinal < 1:
         raise ValueError("--address-ordinal must be >= 1")
@@ -233,16 +257,26 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("--rounding-amount must be finite")
     if args.rounding_payment and args.checkout_payment != "cod":
         raise ValueError("takeout rounding requires COD")
+    if address_policy in (TakeoutAddressPolicy.AUTO, TakeoutAddressPolicy.ADD):
+        missing = address_data.missing_for_add()
+        if missing:
+            raise ValueError("新增地址缺少环境变量字段: " + ",".join(missing))
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        validate_args(args)
+        address_environment = load_takeout_address_environment(
+            os.environ,
+            dotenv_path=ROOT / ".env",
+        )
+        validate_args(args, environ=address_environment)
     except ValueError as exc:
         logger.error("参数安全校验失败: %s", exc)
         return 2
+
+    address_data = load_takeout_address_data(address_environment)
 
     if args.cold:
         os.environ["START_MODE"] = "cold"
@@ -288,6 +322,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 category_aliases=args.category_alias or None,
                 delivery_time_slot_ordinal=args.delivery_time_slot_ordinal,
                 delivery_slot_contains=args.delivery_slot_contains,
+                address_policy=args.address_policy,
+                address_data=address_data,
                 address_ordinal=args.address_ordinal,
                 address_contains=args.address_contains,
                 checkout_payment=args.checkout_payment,

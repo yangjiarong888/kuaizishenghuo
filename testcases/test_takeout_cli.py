@@ -3,6 +3,15 @@ from __future__ import annotations
 import pytest
 
 from scripts import run_takeout_wangwang as script
+from pages import takeout_address
+
+
+ADDRESS_ENV = {
+    "TAKEOUT_ADDRESS_CONTACT": "Automation Contact",
+    "TAKEOUT_ADDRESS_PHONE": "09171234567",
+    "TAKEOUT_ADDRESS_SEARCH": "Robinsons Place Manila",
+    "TAKEOUT_ADDRESS_DETAIL": "Unit 8 test address",
+}
 
 
 def test_takeout_defaults_are_non_submitting() -> None:
@@ -10,6 +19,113 @@ def test_takeout_defaults_are_non_submitting() -> None:
 
     assert args.checkout is False
     assert args.submit_order is False
+
+
+def test_takeout_address_policy_defaults_to_existing() -> None:
+    args = script.build_parser().parse_args([])
+
+    assert args.address_policy == "existing"
+
+
+def test_takeout_add_policy_rejects_missing_address_data_before_driver(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    for key in ADDRESS_ENV:
+        monkeypatch.delenv(key, raising=False)
+
+    class ForbiddenManager:
+        def __init__(self) -> None:
+            raise AssertionError("DriverManager must not be created")
+
+    monkeypatch.setattr(script, "DriverManager", ForbiddenManager)
+    monkeypatch.setattr(script, "ROOT", tmp_path)
+
+    assert script.main(["--checkout", "--address-policy", "add"]) == 2
+
+
+def test_takeout_auto_policy_accepts_complete_environment() -> None:
+    args = script.build_parser().parse_args(
+        ["--checkout", "--address-policy", "auto"]
+    )
+
+    script.validate_args(args, environ=ADDRESS_ENV)
+
+
+def test_takeout_real_submit_with_auto_address_does_not_require_existing_ordinal() -> None:
+    args = script.build_parser().parse_args(
+        [
+            "--checkout",
+            "--submit-order",
+            "--max-payable",
+            "500",
+            "--address-policy",
+            "auto",
+            "--delivery-time-slot-ordinal",
+            "1",
+        ]
+    )
+
+    script.validate_args(args, environ=ADDRESS_ENV)
+
+
+def test_takeout_address_data_can_be_loaded_from_local_dotenv(tmp_path) -> None:
+    dotenv = tmp_path / ".env"
+    dotenv.write_text(
+        "\n".join(f'{key}="{value}"' for key, value in ADDRESS_ENV.items()),
+        encoding="utf-8",
+    )
+
+    loaded = takeout_address.load_takeout_address_environment({}, dotenv_path=dotenv)
+
+    assert loaded == ADDRESS_ENV
+
+
+def test_process_environment_overrides_local_dotenv(tmp_path) -> None:
+    dotenv = tmp_path / ".env"
+    dotenv.write_text(
+        "TAKEOUT_ADDRESS_CONTACT=File Contact\n",
+        encoding="utf-8",
+    )
+
+    loaded = takeout_address.load_takeout_address_environment(
+        {"TAKEOUT_ADDRESS_CONTACT": "Process Contact"},
+        dotenv_path=dotenv,
+    )
+
+    assert loaded["TAKEOUT_ADDRESS_CONTACT"] == "Process Contact"
+
+
+def test_shared_business_address_search_overrides_business_specific_values() -> None:
+    environ = {
+        "BUSINESS_ADDRESS_SEARCH": "Unified Address",
+        "TAKEOUT_ADDRESS_SEARCH": "Old Takeout Address",
+        "MALL_TEST_ADDRESS_QUERY": "Old Mall Address",
+    }
+
+    assert (
+        takeout_address.resolve_business_address_search(
+            environ, "TAKEOUT_ADDRESS_SEARCH"
+        )
+        == "Unified Address"
+    )
+    assert (
+        takeout_address.resolve_business_address_search(
+            environ, "MALL_TEST_ADDRESS_QUERY"
+        )
+        == "Unified Address"
+    )
+
+
+def test_shared_business_contact_overrides_takeout_specific_contact() -> None:
+    data = takeout_address.load_takeout_address_data(
+        {
+            "BUSINESS_ADDRESS_CONTACT": "test",
+            "TAKEOUT_ADDRESS_CONTACT": "Old Contact",
+        }
+    )
+
+    assert data.contact == "test"
 
 
 def test_takeout_cli_rejects_legacy_password_argument() -> None:
