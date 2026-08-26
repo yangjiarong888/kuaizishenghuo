@@ -19,7 +19,8 @@ _SECRET_PATTERN = re.compile(
 
 
 def _sanitize_log_file_tag(raw: str) -> str:
-    value = re.sub(r"[^a-zA-Z0-9_-]+", "_", (raw or "").strip()).strip("_")
+    value = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", (raw or "").strip())
+    value = re.sub(r"\s+", "_", value).strip(" ._")
     return value[:48] if value else ""
 
 
@@ -32,16 +33,20 @@ def _log_file_tag_from_env_or_argv() -> str:
             return _sanitize_log_file_tag(sys.argv[index + 1])
     argv = list(sys.argv)
     script = Path(argv[0]).stem.lower() if argv else ""
+
+    def value_after(flag: str) -> str:
+        try:
+            index = argv.index(flag)
+        except ValueError:
+            return ""
+        return argv[index + 1] if index + 1 < len(argv) else ""
+
+    if script == "run_home_search_matrix":
+        return _sanitize_log_file_tag("App首页搜索矩阵")
+    if script == "run_shop_business" and value_after("--action") == "search_matrix":
+        return _sanitize_log_file_tag("商城首页搜索矩阵")
     if script == "run_takeout_wangwang":
         parts = ["takeout_wangwang"]
-
-        def value_after(flag: str) -> str:
-            try:
-                index = argv.index(flag)
-            except ValueError:
-                return ""
-            return argv[index + 1] if index + 1 < len(argv) else ""
-
         if "--checkout" in argv:
             parts.append("checkout")
         if "--submit-order" in argv:
@@ -90,8 +95,8 @@ def _build_log_path() -> Path:
     log_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     tag = _log_file_tag_from_env_or_argv()
-    suffix = f"_{tag}" if tag else ""
-    return log_dir / f"chopsticklife{suffix}_{timestamp}.log"
+    stem = tag or "chopsticklife"
+    return log_dir / f"{stem}_{timestamp}.log"
 
 
 def setup_logger(name=None, log_level=logging.INFO) -> logging.Logger:

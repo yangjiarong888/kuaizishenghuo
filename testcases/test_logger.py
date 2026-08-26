@@ -109,3 +109,34 @@ def test_takeout_log_name_describes_address_creation_policy(tmp_path, monkeypatc
     name = logger_module._build_log_path().name
 
     assert "takeout_wangwang_checkout_address_auto" in name
+
+
+def test_log_tag_keeps_safe_chinese_business_name():
+    assert logger_module._sanitize_log_file_tag("商城首页搜索矩阵") == "商城首页搜索矩阵"
+
+
+@pytest.mark.parametrize(
+    ("argv", "expected"),
+    [
+        (["scripts/run_home_search_matrix.py"], "App首页搜索矩阵"),
+        (
+            ["scripts/run_shop_business.py", "--action", "search_matrix"],
+            "商城首页搜索矩阵",
+        ),
+    ],
+)
+def test_search_matrix_command_uses_business_log_tag(monkeypatch, argv, expected):
+    monkeypatch.delenv("CHOPSTICKLIFE_LOG_FILE_TAG", raising=False)
+    monkeypatch.setattr(sys, "argv", argv)
+
+    assert logger_module._log_file_tag_from_env_or_argv() == expected
+
+
+def test_business_tag_replaces_generic_filename_stem(tmp_path, monkeypatch):
+    monkeypatch.setenv("CHOPSTICKLIFE_LOG_DIR", str(tmp_path))
+    monkeypatch.setenv("CHOPSTICKLIFE_LOG_FILE_TAG", "商城首页搜索矩阵")
+
+    name = logger_module._build_log_path().name
+
+    assert name.startswith("商城首页搜索矩阵_")
+    assert not name.startswith("chopsticklife_")
