@@ -73,3 +73,19 @@ def test_home_save_screenshot_delegates_to_sanitized_diagnostics(
 
     assert tester.save_screenshot("homepage failed") == expected
     assert calls == [(fake, "homepage failed", str(tmp_path))]
+
+
+def test_home_search_matrix_delegates_to_shared_runner(monkeypatch):
+    fake = FakeDriver()
+    tester = home_module.ChopsticksTester(driver=fake)
+    calls = []
+
+    monkeypatch.setattr(
+        home_module,
+        "run_search_matrix",
+        lambda adapter: calls.append(type(adapter).__name__) or ["summary"],
+        raising=False,
+    )
+
+    assert tester.run_home_search_matrix() == ["summary"]
+    assert calls == ["HomeSearchMatrixAdapter"]

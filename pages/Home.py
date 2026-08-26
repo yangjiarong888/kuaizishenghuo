@@ -13,6 +13,8 @@ from appium.webdriver.common.appiumby import AppiumBy
 
 from commons.diagnostics import capture_failure
 from commons.driver import DriverManager
+from pages.business_search_spec import run_search_matrix
+from pages.home_search_matrix_adapter import HomeSearchMatrixAdapter
 from .app_common import logger, AppConfig
 from .takeout_page import TakeoutPage
 from .shipping_page import ShippingPage
@@ -501,6 +503,10 @@ class ChopsticksTester:
         
         logger.warning("❌ 搜索功能测试失败")
         return False
+
+    def run_home_search_matrix(self):
+        """Run all shared business keywords from the App-home search entrance."""
+        return run_search_matrix(HomeSearchMatrixAdapter(self))
     
     def test_customer_service_button_optimized(self):
         """优化的客服按钮测试"""
