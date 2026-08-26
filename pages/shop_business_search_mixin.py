@@ -262,6 +262,36 @@ class MallBusinessSearchMixin:
                 "\u7279\u4ef7\u7206\u6b3e",
             )
         )
+
+    def _mall_search_results_visible(
+        self, keyword: str, timeout: float = 8.0
+    ) -> bool:
+        """Distinguish actual mall results from the keyword suggestion list."""
+        end = time.time() + timeout
+        result_markers = (
+            "vp_search_result",
+            "rv_goods",
+            "rv_content",
+            "tv_goods_name",
+            "iv_add_cart",
+            "综合排序",
+            "销量优先",
+            "价格优先",
+        )
+        while time.time() < end:
+            try:
+                source = self.driver.page_source or ""
+            except Exception:
+                source = ""
+            on_suggestions = "rv_search" in source and not any(
+                marker in source for marker in result_markers
+            )
+            if not on_suggestions and keyword in source and any(
+                marker in source for marker in result_markers
+            ):
+                return True
+            time.sleep(0.25)
+        return False
     def open_search_page(self) -> bool:
         if self._search_page_visible():
             logger.info("\u5f53\u524d\u5df2\u5728\u641c\u7d22\u9875\uff0c\u76f4\u63a5\u7ee7\u7eed\u641c\u7d22\u4e1a\u52a1")

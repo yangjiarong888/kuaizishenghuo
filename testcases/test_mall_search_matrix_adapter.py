@@ -11,6 +11,7 @@ pytestmark = pytest.mark.unit
 class FakeMallPage:
     def __init__(self):
         self.events = []
+        self.result_states = [True]
 
     def open_search_page(self):
         self.events.append("open")
@@ -26,6 +27,10 @@ class FakeMallPage:
     def _wait_page_contains_any(self, markers, timeout=8.0):
         self.events.append(("wait", tuple(markers), timeout))
         return True
+
+    def _mall_search_results_visible(self, keyword, timeout=8.0):
+        self.events.append(("results", keyword, timeout))
+        return self.result_states.pop(0) if self.result_states else False
 
     def _click_first_text_or_desc(self, labels, **kwargs):
         self.events.append(("prefer", tuple(labels), kwargs))
@@ -70,7 +75,7 @@ def test_mall_adapter_opens_searches_reads_product_and_returns():
         "open",
         ("type", "coffee", False),
         "submit",
-        ("wait", ("coffee", "商品", "综合", "销量", "价格"), 8.0),
+        ("results", "coffee", 8.0),
         (
             "prefer",
             ("商品",),
@@ -100,10 +105,28 @@ def test_mall_adapter_accepts_product_grid_when_goods_tab_is_absent():
 
 def test_mall_adapter_stops_when_result_page_is_not_observed():
     page = FakeMallPage()
-    page._wait_page_contains_any = lambda *_args, **_kwargs: False
+    page.result_states = [False, False]
+    page._click_first_text_or_desc = lambda *_args, **_kwargs: False
     adapter = MallSearchMatrixAdapter(page)
 
     assert adapter.search_keyword("Keep") is False
+
+
+def test_mall_adapter_clicks_matching_suggestion_when_submit_stays_on_list():
+    page = FakeMallPage()
+    page.result_states = [False, True]
+
+    assert MallSearchMatrixAdapter(page).search_keyword("NVV床上") is True
+    assert (
+        "prefer",
+        ("NVV床上",),
+        {
+            "y_min_ratio": 0.08,
+            "y_max_ratio": 0.88,
+            "exact": False,
+            "desc": "搜索联想词",
+        },
+    ) in page.events
 
 
 def test_shop_search_matrix_action_dispatches_shared_runner_and_closes_owned_session(

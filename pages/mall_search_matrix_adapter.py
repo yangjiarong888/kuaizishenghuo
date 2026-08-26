@@ -20,11 +20,17 @@ class MallSearchMatrixAdapter:
         if not self.page._type_into_best_edit_text(keyword, allow_open_search=False):
             return False
         self.page._press_enter_or_search()
-        return bool(
-            self.page._wait_page_contains_any(
-                (keyword, "商品", "综合", "销量", "价格"), timeout=8.0
-            )
-        )
+        if self.page._mall_search_results_visible(keyword, timeout=8.0):
+            return True
+        if not self.page._click_first_text_or_desc(
+            (keyword,),
+            y_min_ratio=0.08,
+            y_max_ratio=0.88,
+            exact=False,
+            desc="搜索联想词",
+        ):
+            return False
+        return bool(self.page._mall_search_results_visible(keyword, timeout=8.0))
 
     def prefer_goods_results(self) -> bool:
         self.page._click_first_text_or_desc(
