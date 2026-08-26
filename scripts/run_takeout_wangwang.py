@@ -125,6 +125,17 @@ def build_parser() -> argparse.ArgumentParser:
             "add 强制新增。新增数据只读取 TAKEOUT_ADDRESS_* 环境变量。"
         ),
     )
+    full_group = parser.add_mutually_exclusive_group()
+    full_group.add_argument(
+        "--full-business",
+        action="store_true",
+        help="从外卖首页执行完整业务，并真实创建一笔 COD 订单后取消",
+    )
+    full_group.add_argument(
+        "--full-business-preview",
+        action="store_true",
+        help="执行完整业务安全预览，停止在最终提交订单前",
+    )
     parser.add_argument(
         "--address-ordinal",
         type=int,
@@ -223,6 +234,23 @@ def validate_args(
     env = os.environ if environ is None else environ
     address_policy = TakeoutAddressPolicy(args.address_policy)
     address_data = load_takeout_address_data(env)
+    full_mode = args.full_business or args.full_business_preview
+    if args.full_business and (
+        args.max_payable is None
+        or not math.isfinite(args.max_payable)
+        or args.max_payable <= 0
+    ):
+        raise ValueError("--full-business requires finite positive --max-payable")
+    if full_mode and (args.delivery_slot_contains or "").strip():
+        raise ValueError("完整业务固定选择后天第5个时段，不允许 --delivery-slot-contains")
+    if full_mode and args.delivery_time_slot_ordinal not in (None, 5):
+        raise ValueError("完整业务固定选择后天第5个时段")
+    if (
+        args.full_business
+        and address_policy is TakeoutAddressPolicy.EXISTING
+        and args.address_ordinal is None
+    ):
+        raise ValueError("--full-business with existing address requires --address-ordinal")
     if args.submit_order and not args.checkout:
         raise ValueError("--submit-order requires --checkout")
     if args.submit_order and (args.max_payable is None or args.max_payable <= 0):
@@ -304,17 +332,30 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             unicode_keyboard=False,
             reset_keyboard=False,
         )
-        ok = open_wangwang_supermarket_from_takeout_home(
-            driver,
-            shop_name=args.shop,
-            ensure_manila_city=not args.no_manila,
-        )
-        if ok and not args.checkout:
+        full_mode = args.full_business or args.full_business_preview
+        if full_mode:
+            page = TakeoutPageBase(driver)
+            ok = page.run_full_takeout_business(
+                shop_name=args.shop,
+                address_policy=args.address_policy,
+                address_data=address_data,
+                address_ordinal=args.address_ordinal,
+                address_contains=args.address_contains,
+                max_payable=args.max_payable,
+                submit_order=args.full_business,
+            )
+        else:
+            ok = open_wangwang_supermarket_from_takeout_home(
+                driver,
+                shop_name=args.shop,
+                ensure_manila_city=not args.no_manila,
+            )
+        if ok and not args.checkout and not full_mode:
             logger.info(
                 "未加 --checkout：进店流程已完成，已跳过店内加购/结账演示。"
                 " 完整下单请加：python scripts/run_takeout_wangwang.py --checkout …"
             )
-        if ok and args.checkout:
+        if ok and args.checkout and not full_mode:
             page = TakeoutPageBase(driver)
             ok = page.run_shop_checkout_pay_and_cancel_flow(
                 submit_order=args.submit_order,
@@ -351,7 +392,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 logger.warning("close_driver 失败: %s", type(exc).__name__)
     if ok:
         completed = ""
-        if args.checkout:
+        if args.full_business:
+            completed = "并完成完整真实 COD 下单及取消流程"
+        elif args.full_business_preview:
+            completed = "并完成完整业务安全预览（未提交订单）"
+        elif args.checkout:
             completed = (
                 "并完成真实下单/取消流程"
                 if args.submit_order

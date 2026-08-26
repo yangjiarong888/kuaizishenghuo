@@ -362,10 +362,15 @@ class TakeoutDeliveryTimeMixin:
                 return True
         return False
 
-    def _tap_allowed_delivery_date_in_sheet(self) -> Optional[str]:
+    def _tap_allowed_delivery_date_in_sheet(
+        self, *, require_day_after_tomorrow: bool = False
+    ) -> Optional[str]:
         """Prefer day after tomorrow, then tomorrow; never choose another day."""
         if self._tap_day_after_tomorrow_date_in_sheet():
             return "后天"
+        if require_day_after_tomorrow:
+            logger.error("完整外卖业务固定选择后天，禁止回退到明天")
+            return None
         if self._tap_tomorrow_date_in_sheet():
             return "明天"
         return None
@@ -572,6 +577,7 @@ class TakeoutDeliveryTimeMixin:
         prefer_scheduled: bool = False,
         preferred_slot_contains: Optional[str] = None,
         delivery_time_slot_ordinal: Optional[int] = None,
+        require_day_after_tomorrow: bool = False,
     ) -> bool:
         """
         与产品流程对齐：回到订单提交页 → **主区手指下移拖动**（露出上方配送行）→ **立即配送**（默认）唤起弹层
@@ -614,7 +620,9 @@ class TakeoutDeliveryTimeMixin:
         time.sleep(1.0)
         list_x = int(w * 0.72)
         with self._maybe_zero_implicit_wait():
-            selected_day = self._tap_allowed_delivery_date_in_sheet()
+            selected_day = self._tap_allowed_delivery_date_in_sheet(
+                require_day_after_tomorrow=require_day_after_tomorrow
+            )
             if selected_day is None:
                 logger.error("未找到明天或后天，禁止选择其他配送日期")
                 return False

@@ -125,7 +125,15 @@ def test_shared_business_contact_overrides_takeout_specific_contact() -> None:
         }
     )
 
-    assert data.contact == "test"
+    assert data.contact == "test "
+
+
+def test_shared_test_contact_restores_required_u0020_after_env_normalization():
+    data = takeout_address.load_takeout_address_data(
+        {"BUSINESS_ADDRESS_CONTACT": "test"}
+    )
+    assert data.contact == "test "
+    assert data.contact.endswith("\u0020")
 
 
 def test_takeout_cli_rejects_legacy_password_argument() -> None:
@@ -470,3 +478,68 @@ def test_takeout_driver_never_switches_to_appium_unicode_keyboard(monkeypatch) -
 
     assert script.main([]) == 0
     assert received == [("takeout_wangwang", False, False)]
+
+
+def test_full_business_requires_positive_max_payable():
+    args = script.build_parser().parse_args(["--full-business"])
+    with pytest.raises(ValueError, match="max-payable"):
+        script.validate_args(args, environ=ADDRESS_ENV)
+
+
+def test_full_business_existing_address_requires_explicit_ordinal():
+    args = script.build_parser().parse_args(
+        ["--full-business", "--max-payable", "5000"]
+    )
+    with pytest.raises(ValueError, match="address-ordinal"):
+        script.validate_args(args, environ=ADDRESS_ENV)
+
+
+def test_full_business_rejects_delivery_slot_overrides():
+    args = script.build_parser().parse_args(
+        [
+            "--full-business",
+            "--max-payable",
+            "5000",
+            "--delivery-time-slot-ordinal",
+            "4",
+        ]
+    )
+    with pytest.raises(ValueError, match="固定选择后天第5个"):
+        script.validate_args(args, environ=ADDRESS_ENV)
+
+
+@pytest.mark.parametrize(
+    ("flag", "expected_submit"),
+    [("--full-business", True), ("--full-business-preview", False)],
+)
+def test_full_business_dispatches_one_page_flow(
+    monkeypatch, tmp_path, flag, expected_submit
+):
+    calls = []
+    fake_driver = object()
+
+    class FakeManager:
+        def get_driver(self, **_kwargs):
+            return fake_driver
+
+        def close_driver(self, **_kwargs):
+            calls.append("close")
+
+    class FakePage:
+        def __init__(self, driver):
+            assert driver is fake_driver
+
+        def run_full_takeout_business(self, **kwargs):
+            calls.append(("full", kwargs["submit_order"]))
+            return True
+
+    monkeypatch.setattr(script, "DriverManager", FakeManager)
+    monkeypatch.setattr(script, "TakeoutPageBase", FakePage)
+    monkeypatch.setattr(script, "ROOT", tmp_path)
+    for key, value in ADDRESS_ENV.items():
+        monkeypatch.setenv(key, value)
+    argv = [flag, "--address-policy", "auto"]
+    if expected_submit:
+        argv += ["--max-payable", "5000"]
+    assert script.main(argv) == 0
+    assert calls == [("full", expected_submit), "close"]

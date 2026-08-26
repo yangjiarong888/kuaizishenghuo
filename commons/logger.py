@@ -45,7 +45,16 @@ def _log_file_tag_from_env_or_argv() -> str:
         return _sanitize_log_file_tag("App首页搜索矩阵")
     if script == "run_shop_business" and value_after("--action") == "search_matrix":
         return _sanitize_log_file_tag("商城首页搜索矩阵")
+    if script == "run_takeout_search_matrix":
+        scope = value_after("--scope").lower()
+        return _sanitize_log_file_tag(
+            "旺旺店内搜索矩阵" if scope == "wangwang" else "外卖首页搜索矩阵"
+        )
     if script == "run_takeout_wangwang":
+        if "--full-business" in argv:
+            return _sanitize_log_file_tag("外卖完整业务_旺旺超市_真实COD下单")
+        if "--full-business-preview" in argv:
+            return _sanitize_log_file_tag("外卖完整业务_安全预览")
         parts = ["takeout_wangwang"]
         if "--checkout" in argv:
             parts.append("checkout")

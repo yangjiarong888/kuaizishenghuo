@@ -140,3 +140,34 @@ def test_business_tag_replaces_generic_filename_stem(tmp_path, monkeypatch):
 
     assert name.startswith("商城首页搜索矩阵_")
     assert not name.startswith("chopsticklife_")
+
+
+@pytest.mark.parametrize(
+    ("scope", "expected"),
+    [("home", "外卖首页搜索矩阵"), ("wangwang", "旺旺店内搜索矩阵")],
+)
+def test_takeout_search_matrix_uses_scope_business_tag(
+    monkeypatch, scope, expected
+):
+    monkeypatch.delenv("CHOPSTICKLIFE_LOG_FILE_TAG", raising=False)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["scripts/run_takeout_search_matrix.py", "--scope", scope],
+    )
+    assert logger_module._log_file_tag_from_env_or_argv() == expected
+
+
+@pytest.mark.parametrize(
+    ("flag", "expected"),
+    [
+        ("--full-business", "外卖完整业务_旺旺超市_真实COD下单"),
+        ("--full-business-preview", "外卖完整业务_安全预览"),
+    ],
+)
+def test_full_takeout_business_uses_ordered_business_log_tag(
+    monkeypatch, flag, expected
+):
+    monkeypatch.delenv("CHOPSTICKLIFE_LOG_FILE_TAG", raising=False)
+    monkeypatch.setattr(sys, "argv", ["scripts/run_takeout_wangwang.py", flag])
+    assert logger_module._log_file_tag_from_env_or_argv() == expected

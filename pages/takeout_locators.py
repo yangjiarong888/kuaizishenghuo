@@ -11,6 +11,12 @@ _PACKAGES: Tuple[str, ...] = (
     "com.hu.feifubao",
 )
 
+TAKEOUT_HOME_CART_LABELS: Tuple[str, ...] = ("购物车", "外卖购物车")
+TAKEOUT_HOME_TOP_LABELS: Tuple[str, ...] = ("回到顶部", "返回顶部", "顶部")
+TAKEOUT_DISCOUNT_LABEL = "满减活动"
+TAKEOUT_CONGEE_CATEGORY_LABEL = "粥粉面饺"
+TAKEOUT_SERVICE_LABELS: Tuple[str, ...] = ("客服", "24小时客服")
+
 
 def _merchant_list_rid(pkg: str) -> str:
     return f"{pkg}:id/rv_merchant"

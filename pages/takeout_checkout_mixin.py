@@ -3664,6 +3664,7 @@ class TakeoutCheckoutMixin(
         delivery_prefer_scheduled: bool = False,
         delivery_slot_contains: Optional[str] = None,
         delivery_time_slot_ordinal: Optional[int] = None,
+        require_day_after_tomorrow: bool = False,
         address_policy: str = TakeoutAddressPolicy.EXISTING.value,
         address_data: Optional[TakeoutAddressData] = None,
         address_ordinal: Optional[int] = None,
@@ -3810,6 +3811,7 @@ class TakeoutCheckoutMixin(
             prefer_scheduled=delivery_prefer_scheduled,
             preferred_slot_contains=delivery_slot_contains,
             delivery_time_slot_ordinal=delivery_time_slot_ordinal,
+            require_day_after_tomorrow=require_day_after_tomorrow,
         )
         if not slot_ok:
             logger.error("未选到配送时段，终止支付流程")
