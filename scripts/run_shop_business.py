@@ -21,19 +21,23 @@ import argparse
 import os
 import sys
 from pathlib import Path
+from typing import Optional, Sequence
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from commons.driver import DriverManager
+from commons.diagnostics import capture_failure
 from commons.logger import setup_logger
+from pages.business_search_spec import SearchMatrixError, run_search_matrix
+from pages.mall_search_matrix_adapter import MallSearchMatrixAdapter
 from pages.shop_business_page import ShopBusinessPage
 
 logger = setup_logger(__name__)
 
 
-def main() -> int:
+def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="商城业务：搜索/详情/下单/IM/分享")
     parser.add_argument(
         "--action",
@@ -47,6 +51,7 @@ def main() -> int:
             "category",
             "activity",
             "explore",
+            "search_matrix",
             "full",
         ),
         default="full",
@@ -81,7 +86,7 @@ def main() -> int:
         action="store_true",
         help="流程结束后关闭 Appium 会话",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if args.cold:
         os.environ["START_MODE"] = "cold"
@@ -113,6 +118,9 @@ def main() -> int:
             ok = page.run_activity_random_add_cart_to_cart()
         elif args.action == "explore":
             ok = page.run_category_and_activity_explore()
+        elif args.action == "search_matrix":
+            run_search_matrix(MallSearchMatrixAdapter(page))
+            ok = True
         elif args.action == "im":
             ok = page.open_goods_detail(args.keyword) and page.send_detail_im_message(
                 args.message
@@ -133,6 +141,20 @@ def main() -> int:
                 share_target=share_target,
                 submit_order=args.submit_order,
             )
+    except SearchMatrixError as exc:
+        capture_failure(
+            driver,
+            f"mall_search_{exc.index}_{exc.keyword}",
+            "artifacts/mall_search",
+        )
+        logger.error(
+            "商城搜索矩阵失败 source=%s stage=%s index=%s keyword=%r",
+            exc.source,
+            exc.stage,
+            exc.index,
+            exc.keyword,
+        )
+        ok = False
     finally:
         if args.quit_driver:
             try:

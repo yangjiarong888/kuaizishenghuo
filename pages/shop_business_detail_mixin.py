@@ -8,6 +8,7 @@ from typing import Optional
 from appium.webdriver.common.appiumby import AppiumBy
 
 from commons.logger import setup_logger
+from pages.business_search_spec import SearchProductSummary
 from pages.shop_locators import (
     SHOP_ID_CL_ITEM_CONTAINER,
     SHOP_ID_GOODS_LIST_ITEM,
@@ -29,6 +30,48 @@ logger = setup_logger(__name__)
 
 class MallBusinessDetailMixin:
     """Product/detail behavior; host supplies search and home capabilities."""
+
+    def read_visible_goods_summary(
+        self, keyword: str
+    ) -> Optional[SearchProductSummary]:
+        """Read a stable, visible summary without interacting with purchase controls."""
+        if not self._is_mall_product_detail_visible():
+            return None
+        candidates = self._visible_text_candidates_by_band(
+            x_min_ratio=0.05,
+            x_max_ratio=0.95,
+            y_min_ratio=0.08,
+            y_max_ratio=0.88,
+            exclude=("加入购物车", "立即购买", "客服", "购物车"),
+            min_len=1,
+        )
+        texts = [item[2] for item in candidates]
+        name = next(
+            (
+                text
+                for text in texts
+                if text and "₱" not in text and not text.startswith("P ")
+            ),
+            "",
+        )
+        price = next(
+            (text for text in texts if "₱" in text or text.startswith("P ")),
+            "",
+        )
+        specification = next(
+            (
+                text
+                for text in texts
+                if text not in (name, price)
+                and any(char.isdigit() for char in text)
+                and not ("₱" in text or text.startswith("P "))
+            ),
+            "",
+        )
+        if not name:
+            return None
+        return SearchProductSummary(keyword, name, price, specification)
+
     def _product_candidate_roots(self):
         h = self._window_size()[1]
         y_lo, y_hi = int(h * 0.16), int(h * 0.86)
