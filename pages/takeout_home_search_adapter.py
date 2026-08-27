@@ -14,7 +14,9 @@ class TakeoutHomeSearchAdapter:
         self.page = page
 
     def open_search(self) -> bool:
-        return bool(self.page.open_takeout_home_search())
+        if not self.page.open_takeout_home_search():
+            return False
+        return bool(self.page.browse_takeout_search_landing_business())
 
     def search_keyword(self, keyword: str) -> bool:
         if not self.page.type_takeout_search_keyword(keyword):

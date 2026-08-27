@@ -17,6 +17,10 @@ class FakeTakeoutSearchPage:
         self.events.append("open-home")
         return True
 
+    def browse_takeout_search_landing_business(self):
+        self.events.append("browse-home-search-landing")
+        return True
+
     def open_takeout_merchant_search(self):
         self.events.append("open-merchant")
         return True
@@ -91,6 +95,20 @@ def test_takeout_home_search_uses_suggestion_when_button_stays_on_list():
     page.result_states = [False, True]
     assert TakeoutHomeSearchAdapter(page).search_keyword("coffee")
     assert ("suggestion", "coffee") in page.events
+
+
+def test_takeout_home_search_covers_landing_business_before_keyword_matrix():
+    page = FakeTakeoutSearchPage()
+
+    assert TakeoutHomeSearchAdapter(page).open_search() is True
+    assert page.events == ["open-home", "browse-home-search-landing"]
+
+
+def test_takeout_home_search_stops_when_landing_business_fails():
+    page = FakeTakeoutSearchPage()
+    page.browse_takeout_search_landing_business = lambda: False
+
+    assert TakeoutHomeSearchAdapter(page).open_search() is False
 
 
 def test_merchant_search_never_uses_external_suggestion_fallback():
