@@ -1,4 +1,19 @@
-"""Login CLI and reusable login-method dispatch."""
+"""
+登录业务入口：微信、QQ、Google、手机验证码、密码、客服及忘记密码。
+
+须在项目根目录执行，且 Appium 已启动、设备已连接。
+
+用法：
+  python scripts/run_login.py --method wechat
+  python scripts/run_login.py --method phone --phone "手机号" --code "验证码"
+  python scripts/run_login.py --method password --phone "手机号" --password "密码"
+  python scripts/run_login.py --method customer_service
+  python scripts/run_login.py --method forget_password
+  python scripts/run_login.py --method qq --no-from-home
+
+phone/password/forget_password 也可读取 LOGIN_DEFAULT_PHONE、
+LOGIN_DEFAULT_PASSWORD、LOGIN_DEFAULT_NEW_PASSWORD 环境变量。
+"""
 
 from __future__ import annotations
 

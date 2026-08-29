@@ -1,5 +1,22 @@
 #!/usr/bin/env python3
-"""Run one prevalidated international-shipping order flow."""
+"""
+国际货运真实订单：选择/新增地址并按余额或 COD 提交订单。
+
+须在项目根目录执行，且 Appium 已启动、设备已连接、账号已登录。
+注意：除 --cancel-unpaid 场景外，本脚本会产生真实订单。
+
+用法：
+  python scripts/run_shipping_business.py --payment-method cod --address-policy existing
+  python scripts/run_shipping_business.py --payment-method balance --cancel-unpaid
+  python scripts/run_shipping_business.py --payment-method balance --address-policy add
+  python scripts/run_shipping_business.py --payment-method cod --keep-driver --session shipping_demo
+
+环境变量：
+  existing 需要 SHIPPING_ADDRESS_MATCH。
+  add 需要 SHIPPING_ADDRESS_NAME、SHIPPING_ADDRESS_PHONE、SHIPPING_ADDRESS_COUNTRY、
+  SHIPPING_ADDRESS_CITY、SHIPPING_ADDRESS_DETAIL、SHIPPING_ADDRESS_POSTCODE。
+  余额真实支付需要 SHIPPING_PAY_PASSWORD。
+"""
 
 from __future__ import annotations
 

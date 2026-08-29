@@ -1,5 +1,17 @@
 #!/usr/bin/env python3
-"""Run the shared nine-keyword matrix from the App-home search entrance."""
+"""
+App 首页搜索矩阵：输入关键词、校验联想词、分别通过搜索按钮和联想词进入结果页。
+
+须在项目根目录执行，且 Appium 已启动、设备已连接。
+
+用法：
+  python scripts/run_home_search_matrix.py
+  python scripts/run_home_search_matrix.py --cold
+  python scripts/run_home_search_matrix.py --session home_search_demo
+
+固定关键词：旺仔牛奶、水、可乐、泡面、coffee、NVV床上、
+DUDAO22.5W超级快充迷、Adidas、Keep。
+"""
 
 from __future__ import annotations
 

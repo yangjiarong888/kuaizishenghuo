@@ -1,5 +1,18 @@
 #!/usr/bin/env python3
-"""Run the shared search matrix from takeout home or Wangwang merchant home."""
+"""
+外卖搜索矩阵：支持外卖首页搜索和旺旺商家主页搜索两个入口。
+
+须在项目根目录执行，且 Appium 已启动、设备已连接。
+
+用法：
+  python scripts/run_takeout_search_matrix.py --scope home
+  python scripts/run_takeout_search_matrix.py --scope wangwang
+  python scripts/run_takeout_search_matrix.py --scope wangwang --shop "旺旺超市 WWCS"
+  python scripts/run_takeout_search_matrix.py --scope home --session takeout_search_demo
+
+home 会先验证热搜词、榜单商家、榜单左滑和可选历史搜索，再执行固定九关键词；
+wangwang 只执行商家主页内的固定九关键词搜索。
+"""
 
 from __future__ import annotations
 

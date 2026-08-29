@@ -1,4 +1,14 @@
-"""Run fail-closed, read-only navigation checks for the “我的” area."""
+"""
+个人中心只读巡检：进入“我的”页面并校验允许访问的导航入口，不修改业务数据。
+
+须在项目根目录执行，且 Appium 已启动、设备已连接。
+
+用法：
+  python scripts/run_my_profile_navigation.py
+  python scripts/run_my_profile_navigation.py --logged-out
+  python scripts/run_my_profile_navigation.py --cold
+  python scripts/run_my_profile_navigation.py --start-mode activate --session profile_demo
+"""
 
 from __future__ import annotations
 

@@ -1,6 +1,22 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""同城跑腿业务命令行入口。"""
+"""
+同城跑腿业务：菜单往返巡检、下单流程或两者完整执行。
+
+须在项目根目录执行，且 Appium 已启动、设备已连接、账号已登录。
+默认不提交订单；只有显式传入 --submit-order 才会真实提交。
+
+用法：
+  python scripts/run_transfer_business.py --action menus
+  python scripts/run_transfer_business.py --action order
+  python scripts/run_transfer_business.py --action full
+  python scripts/run_transfer_business.py --action order --submit-order --payment-method balance
+  python scripts/run_transfer_business.py --action order --submit-order --payment-method maya --exercise-maya-return
+  python scripts/run_transfer_business.py --action full --session transfer_demo --quit-driver
+
+余额支付读取 TRANSFER_PAY_PASSWORD；Maya 流程读取 TRANSFER_MAYA_ACCOUNT 和
+TRANSFER_MAYA_PASSWORD。
+"""
 from __future__ import annotations
 
 import argparse
