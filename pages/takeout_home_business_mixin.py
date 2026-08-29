@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from typing import Optional, Sequence
+from xml.etree import ElementTree
 
 from appium.webdriver.common.appiumby import AppiumBy
 
@@ -217,12 +218,50 @@ class TakeoutHomeBusinessMixin:
     def open_takeout_home_search(self) -> bool:
         if not self.ensure_takeout_tab():
             return False
-        return self._takeout_click_label(
-            ("搜索商家或商品", "搜索商品", "搜索"), y_max_ratio=0.28
-        ) and self._takeout_search_input() is not None
+        clicked = False
+        for suffix in ("ll_search", "iv_search"):
+            for pkg in _PACKAGES:
+                try:
+                    elements = self.driver.find_elements(
+                        AppiumBy.ID, f"{pkg}:id/{suffix}"
+                    )
+                except Exception:
+                    elements = []
+                for element in elements:
+                    try:
+                        if not element.is_displayed() or not element.is_enabled():
+                            continue
+                        self._nearest_clickable_ancestor(element).click()
+                        logger.info("已按稳定 resource-id 打开外卖首页搜索：%s", suffix)
+                        clicked = True
+                        break
+                    except Exception:
+                        continue
+                if clicked:
+                    break
+            if clicked:
+                break
+        if not clicked:
+            clicked = self._takeout_click_label(
+                ("搜索商家或商品", "搜索商品", "搜索"), y_max_ratio=0.28
+            )
+        if not clicked:
+            return False
+        end = time.monotonic() + 6.0
+        while time.monotonic() < end:
+            if self._takeout_search_input() is not None:
+                return True
+            time.sleep(0.25)
+        return False
 
     def _takeout_visible_text_nodes(self):
         """Return visible text/description nodes with stable screen geometry."""
+        try:
+            size = self.driver.get_window_size()
+            screen_width = int(size.get("width", 1080))
+            screen_height = int(size.get("height", 1920))
+        except Exception:
+            screen_width, screen_height = 1080, 1920
         try:
             elements = self.driver.find_elements(
                 AppiumBy.XPATH,
@@ -241,12 +280,23 @@ class TakeoutHomeBusinessMixin:
                     or (element.get_attribute("content-desc") or "").strip()
                 )
                 rect = element.rect
+                x = int(rect.get("x", 0))
+                y = int(rect.get("y", 0))
+                width = int(rect.get("width", 0))
+                height = int(rect.get("height", 0))
+                if (
+                    x + width <= 0
+                    or x >= screen_width
+                    or y + height <= 0
+                    or y >= screen_height
+                ):
+                    continue
                 key = (
                     text,
-                    int(rect.get("x", 0)),
-                    int(rect.get("y", 0)),
-                    int(rect.get("width", 0)),
-                    int(rect.get("height", 0)),
+                    x,
+                    y,
+                    width,
+                    height,
                 )
                 if not text or key in seen:
                     continue
@@ -288,9 +338,42 @@ class TakeoutHomeBusinessMixin:
         )
 
     def _takeout_click_text_node(self, node, desc: str) -> bool:
-        text, _x, _y, _width, _height, element = node
+        text, x, y, width, height, element = node
+        target = None
         try:
-            self._nearest_clickable_ancestor(element).click()
+            resource_id = element.get_attribute("resource-id") or ""
+        except Exception:
+            resource_id = ""
+        if resource_id.endswith(":id/tv_hot"):
+            center_x = x + max(width // 2, 1)
+            center_y = y + max(height // 2, 1)
+            for pkg in _PACKAGES:
+                try:
+                    containers = self.driver.find_elements(
+                        AppiumBy.ID, f"{pkg}:id/ll_hot"
+                    )
+                except Exception:
+                    containers = []
+                for container in containers:
+                    try:
+                        if not container.is_displayed() or not container.is_enabled():
+                            continue
+                        rect = container.rect
+                        left = int(rect.get("x", 0))
+                        top = int(rect.get("y", 0))
+                        right = left + int(rect.get("width", 0))
+                        bottom = top + int(rect.get("height", 0))
+                        if left <= center_x <= right and top <= center_y <= bottom:
+                            target = container
+                            break
+                    except Exception:
+                        continue
+                if target is not None:
+                    break
+        if target is None:
+            target = self._nearest_clickable_ancestor(element)
+        try:
+            target.click()
             logger.info("%s：%s", desc, text)
             time.sleep(0.7)
             return True
@@ -306,7 +389,10 @@ class TakeoutHomeBusinessMixin:
             inside_shop = bool(self._looks_inside_takeout_shop())
         except (AttributeError, TypeError):
             inside_shop = False
-        if inside_shop or any(
+        flutter_merchant_header = "营业时间" in source and any(
+            marker in source for marker in ("查看评价", "到店消费")
+        )
+        if inside_shop or flutter_merchant_header or any(
             marker in source
             for marker in (
                 "店内招牌",
@@ -322,7 +408,10 @@ class TakeoutHomeBusinessMixin:
             )
         ):
             return "merchant"
-        if any(
+        if (
+            "rl_activity_title" in source
+            and "android.webkit.WebView" in source
+        ) or any(
             marker in source
             for marker in (
                 "活动详情",
@@ -360,7 +449,9 @@ class TakeoutHomeBusinessMixin:
             time.sleep(0.25)
         return None
 
-    def _return_to_takeout_search_landing(self) -> bool:
+    def _return_to_takeout_search_landing(
+        self, *, reopen_from_home: bool = False
+    ) -> bool:
         try:
             self.driver.back()
         except Exception:
@@ -369,6 +460,14 @@ class TakeoutHomeBusinessMixin:
         while time.monotonic() < end:
             if self._takeout_search_landing_visible():
                 return True
+            if reopen_from_home:
+                try:
+                    on_home = bool(self.is_on_takeout_merchant_home())
+                except (AttributeError, TypeError):
+                    on_home = False
+                if on_home:
+                    logger.info("历史搜索结果返回到外卖首页，重新打开搜索页")
+                    return bool(self.open_takeout_home_search())
             time.sleep(0.25)
         return False
 
@@ -420,13 +519,19 @@ class TakeoutHomeBusinessMixin:
             height = int(self.driver.get_window_size().get("height", 1920))
         except Exception:
             height = 1920
-        return [
-            node
-            for node in self._takeout_visible_text_nodes()
-            if node[2] >= int(height * 0.30)
-            and ("榜" in node[0] or "推荐" in node[0])
-            and "人气大榜" not in node[0]
-        ]
+        titles = []
+        for node in self._takeout_visible_text_nodes():
+            if node[2] < int(height * 0.30) or "人气大榜" in node[0]:
+                continue
+            try:
+                resource_id = node[5].get_attribute("resource-id") or ""
+            except Exception:
+                resource_id = ""
+            if resource_id.endswith(":id/tv_title") or (
+                "榜" in node[0] or "推荐" in node[0]
+            ):
+                titles.append(node)
+        return titles
 
     def _takeout_ranking_snapshot(self) -> tuple[str, ...]:
         titles = self._takeout_ranking_titles()
@@ -557,7 +662,7 @@ class TakeoutHomeBusinessMixin:
         if not self.takeout_search_results_visible(keyword, timeout=7.0):
             logger.error("历史搜索词未进入对应搜索结果 keyword=%s", keyword)
             return False
-        return self._return_to_takeout_search_landing()
+        return self._return_to_takeout_search_landing(reopen_from_home=True)
 
     def browse_takeout_search_landing_business(self) -> bool:
         """Validate dynamic hot words, ranking cards, and optional history."""
@@ -606,24 +711,100 @@ class TakeoutHomeBusinessMixin:
             return None
 
     def type_takeout_search_keyword(self, keyword: str) -> bool:
+        try:
+            activity = self.driver.current_activity or ""
+        except Exception:
+            activity = ""
+        if "TakeoutSearchActivity" in activity:
+            try:
+                self.driver.back()
+            except Exception:
+                return False
+            back_end = time.monotonic() + 6.0
+            while time.monotonic() < back_end:
+                try:
+                    activity = self.driver.current_activity or ""
+                except Exception:
+                    activity = ""
+                if "TakeoutSearchActivity" not in activity:
+                    if self._takeout_search_input() is not None:
+                        logger.info("外卖下一关键词已从结果页返回搜索输入页")
+                        break
+                    try:
+                        on_home = bool(self.is_on_takeout_merchant_home())
+                    except (AttributeError, TypeError):
+                        on_home = False
+                    if on_home and self.open_takeout_home_search():
+                        logger.info("外卖结果页返回到首页，已重新打开搜索页")
+                        break
+                time.sleep(0.25)
+            else:
+                logger.error("外卖搜索结果页返回输入页超时")
+                return False
         edit = self._takeout_search_input()
         if not edit:
             return False
         try:
             edit.click()
-            edit.clear()
+            old_text = (edit.text or "").strip()
+        except Exception:
+            return False
+        close_clicked = False
+        if old_text:
+            for pkg in _PACKAGES:
+                try:
+                    elements = self.driver.find_elements(
+                        AppiumBy.ID, f"{pkg}:id/iv_close"
+                    )
+                except Exception:
+                    elements = []
+                for element in elements:
+                    try:
+                        if not element.is_displayed() or not element.is_enabled():
+                            continue
+                        element.click()
+                        close_clicked = True
+                        logger.info("外卖搜索已通过 iv_close 清空旧关键词：%s", old_text)
+                        break
+                    except Exception:
+                        continue
+                if close_clicked:
+                    break
+        if not close_clicked:
+            try:
+                edit.clear()
+            except Exception:
+                return False
+        clear_end = time.monotonic() + 3.0
+        while time.monotonic() < clear_end:
+            edit = self._takeout_search_input()
+            if edit is None:
+                time.sleep(0.2)
+                continue
+            try:
+                if not (edit.text or "").strip():
+                    break
+            except Exception:
+                pass
+            time.sleep(0.2)
+        else:
+            logger.error("外卖搜索旧关键词未清空：%s", old_text)
+            return False
+        try:
             edit.send_keys(keyword)
         except Exception:
             return False
         end = time.monotonic() + 3.0
         while time.monotonic() < end:
+            edit = self._takeout_search_input()
+            if edit is None:
+                time.sleep(0.2)
+                continue
             try:
                 if (edit.text or "").strip() == keyword:
                     return True
             except Exception:
                 pass
-            if keyword in self._takeout_source():
-                return True
             time.sleep(0.2)
         return False
 
@@ -703,6 +884,41 @@ class TakeoutHomeBusinessMixin:
     def read_takeout_goods_summary(
         self, keyword: str
     ) -> Optional[SearchProductSummary]:
+        end = time.monotonic() + 5.0
+        while time.monotonic() < end:
+            source = self._takeout_source()
+            try:
+                root = ElementTree.fromstring(source)
+            except (ElementTree.ParseError, ValueError, TypeError):
+                root = None
+            if root is not None:
+                for element in root.iter():
+                    raw = (
+                        (element.attrib.get("content-desc") or "").strip()
+                        or (element.attrib.get("text") or "").strip()
+                    )
+                    if keyword not in raw or "₱" not in raw:
+                        continue
+                    parts = [part.strip() for part in raw.splitlines() if part.strip()]
+                    name = next(
+                        (part for part in parts if keyword in part and "₱" not in part),
+                        "",
+                    )
+                    price = next((part for part in parts if "₱" in part), "")
+                    specification = next(
+                        (
+                            part
+                            for part in parts
+                            if part not in (name, price)
+                            and any(character.isdigit() for character in part)
+                        ),
+                        "",
+                    )
+                    if name:
+                        return SearchProductSummary(
+                            keyword, name, price, specification
+                        )
+            time.sleep(0.4)
         values: list[str] = []
         try:
             elements = self.driver.find_elements(
